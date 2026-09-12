@@ -1,0 +1,17 @@
+# Retrieval artifacts are addressed by byte offset, or are raw binary, so Git
+# must never rewrite their line endings.
+#
+# Measured failure: with core.autocrlf=true (the default for Git for Windows)
+# `docs.cos.jsonl` was checked out as 10094 bytes instead of 10083 -- one extra
+# byte per line -- while the binary `docs.cos.offsets.u64` was not converted.
+# Every recorded offset then pointed one byte short of its row, and the reader
+# failed with "Expecting value: line 1 column 1 (char 0)".
+#
+# `-text` stores and checks out the bytes verbatim on every platform.
+*.jsonl -text
+*.f32   -text -diff
+*.sq8   -text -diff
+*.int8  -text -diff
+*.u64   -text -diff
+*.faiss -text -diff
+*.pkl   -text -diff
