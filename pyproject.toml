@@ -1,0 +1,58 @@
+[project]
+name = "local-rag-agent"
+version = "0.1.0rc1"
+description = "本地资料库智能问答：独立只读 RAG 检索服务（MCP/HTTP/CLI）+ 离线优先 Web 对话 Agent"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Apache-2.0" }
+authors = [{ name = "RAG-Agent contributors" }]
+keywords = ["rag", "mcp", "ollama", "offline", "ctf", "faiss", "knowledge-base"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security",
+]
+dependencies = [
+    "faiss-cpu==1.9.0",
+    "numpy==2.2.3",
+    "httpx==0.27.2",
+    "pydantic==2.9.2",
+    "fastapi==0.115.8",
+    "uvicorn==0.34.0",
+    "mcp>=1.12.0,<2",
+]
+
+[project.optional-dependencies]
+index = [
+    # `python -m rag_service.build_cosine` unpickles the docstore written by the
+    # upstream index builder, so these classes must be importable at that time.
+    # Querying an already-converted index does not need them.
+    "langchain-community==0.3.17",
+    "langchain-core==0.3.35",
+]
+dev = [
+    "pytest>=8.3",
+    "local-rag-agent[index]",
+]
+
+[project.scripts]
+rag-service = "rag_service.__main__:main"
+agent-service = "agent_service.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["rag_service", "rag_service.backends", "agent_service"]
+
+[tool.setuptools.package-data]
+agent_service = ["static/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

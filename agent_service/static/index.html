@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本地资料库智能问答</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36;
+    --fg: #e6e9ef; --muted: #9aa3b2; --accent: #4f8cff; --warn: #d9a441; --err: #e56e6e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.65 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--fg); }
+  header { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+           padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0 8px 0 0; }
+  select, input, button, textarea { font: inherit; color: var(--fg); background: #11141a;
+           border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .spacer { flex: 1; }
+  .chip { font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .chip.ok { color: #6fd08c; border-color: #2c4a35; }
+  .chip.bad { color: var(--err); border-color: #4a2c2c; }
+  main { max-width: 860px; margin: 0 auto; padding: 18px 16px 160px; }
+  .msg { margin: 0 0 16px; }
+  .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .bubble { white-space: pre-wrap; word-wrap: break-word; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; }
+  .msg.user .bubble { background: #16202f; }
+  .note { font-size: 13px; color: var(--warn); margin: 6px 0; }
+  .note.err { color: var(--err); }
+  details.evidence { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  details.evidence ol { margin: 6px 0 0; padding-left: 22px; }
+  details.evidence li { margin-bottom: 3px; word-break: break-all; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
+           border-top: 1px solid var(--line); padding: 10px 16px; }
+  .composer { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; resize: none; min-height: 42px; max-height: 180px; }
+  .hintline { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>本地资料库智能问答</h1>
+  <select id="provider" title="模型提供方"></select>
+  <select id="model" title="模型"></select>
+  <label class="chip"><input type="checkbox" id="rag" checked> 检索知识库</label>
+  <span class="spacer"></span>
+  <span id="status" class="chip">检查中…</span>
+  <button id="refresh">重新检查</button>
+  <button id="clear">清空对话</button>
+</header>
+
+<main id="log"></main>
+
+<footer>
+  <div class="composer">
+    <textarea id="input" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+    <button class="primary" id="send">发送</button>
+  </div>
+  <div class="hintline" id="authline" hidden>
+    <input id="token" type="password" placeholder="API Token"> <span id="autherr"></span>
+  </div>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { config: null, messages: [], busy: false, token: localStorage.getItem("agent_token") || "" };
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function render(role, text) {
+  const wrap = el("div", "msg " + role);
+  wrap.appendChild(el("div", "who", role === "user" ? "我" : "助手"));
+  const bubble = el("div", "bubble", text);
+  wrap.appendChild(bubble);
+  $("log").appendChild(wrap);
+  window.scrollTo(0, document.body.scrollHeight);
+  return { wrap, bubble };
+}
+
+function note(parent, text, isError) {
+  parent.appendChild(el("div", "note" + (isError ? " err" : ""), text));
+}
+
+function showEvidence(parent, event) {
+  const box = el("details", "evidence");
+  box.appendChild(el("summary", null,
+    `检索到 ${event.total} 条证据（知识库 ${event.knowledge_base}）`));
+  const list = el("ol");
+  (event.results || []).forEach((item) => {
+    const text = `${item.source} · ${item.chunk_id} · score ${Number(item.score).toFixed(3)}`;
+    list.appendChild(el("li", null, text));
+  });
+  box.appendChild(list);
+  parent.appendChild(box);
+}
+
+async function loadConfig() {
+  const res = await fetch("/api/config");
+  if (!res.ok) throw new Error(`/api/config HTTP ${res.status}`);
+  const config = await res.json();
+  state.config = config;
+
+  $("provider").replaceChildren(...config.providers.map((p) => {
+    const option = el("option", null, p.label);
+    option.value = p.id;
+    return option;
+  }));
+  $("provider").value = config.default_provider;
+  fillModels(config.default_model);
+  $("rag").checked = !!config.rag.enabled;
+  $("authline").hidden = !config.auth_required;
+  if (state.token) $("token").value = state.token;
+  refreshStatus();
+}
+
+function fillModels(preferred) {
+  if (!state.config) return;
+  const provider = state.config.providers.find((p) => p.id === $("provider").value);
+  const models = (provider && provider.models.length) ? provider.models : [preferred];
+  $("model").replaceChildren(...models.map((name) => {
+    const option = el("option", null, name);
+    option.value = name;
+    return option;
+  }));
+  if (preferred && models.includes(preferred)) $("model").value = preferred;
+}
+
+async function refreshStatus() {
+  const chip = $("status");
+  chip.className = "chip";
+  chip.textContent = "检查中…";
+  try {
+    const res = await fetch("/api/health");
+    const health = await res.json();
+    const ready = health.providers.filter((p) => p.ok);
+    const rag = health.rag || {};
+    const parts = [`模型 ${ready.length}/${health.providers.length}`];
+    parts.push(rag.enabled === false ? "检索未启用" : (rag.error ? "检索不可用" : "检索就绪"));
+    chip.textContent = parts.join(" · ");
+    chip.className = "chip " + (ready.length ? (rag.error ? "bad" : "ok") : "bad");
+    const offline = health.providers.filter((p) => p.ok && p.offline).map((p) => p.id);
+    if (!offline.length) chip.textContent += "（无离线模型可用）";
+  } catch (err) {
+    chip.className = "chip bad";
+    chip.textContent = "服务不可达";
+  }
+}
+
+async function send() {
+  if (state.busy) return;
+  const input = $("input");
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = "";
+  input.style.height = "auto";
+  render("user", text);
+  state.messages.push({ role: "user", content: text });
+  const { wrap, bubble } = render("assistant", "");
+  const sendButton = $("send");
+  state.busy = true;
+  sendButton.disabled = true;
+  sendButton.textContent = "生成中…";
+
+  const headers = { "Content-Type": "application/json" };
+  if (state.token) headers.Authorization = "Bearer " + state.token;
+
+  let answer = "";
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        messages: state.messages,
+        provider: $("provider").value,
+        model: $("model").value,
+        use_rag: $("rag").checked,
+      }),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { detail = (await res.json()).detail || detail; } catch (_) {}
+      if (res.status === 401) $("autherr").textContent = "Token 无效";
+      note(wrap, "请求失败：" + detail, true);
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop();
+      for (const frame of frames) {
+        const line = frame.split("\n").find((item) => item.startsWith("data:"));
+        if (!line) continue;
+        const event = JSON.parse(line.slice(5).trim());
+        if (event.type === "delta") {
+          answer += event.text;
+          bubble.textContent = answer;
+          window.scrollTo(0, document.body.scrollHeight);
+        } else if (event.type === "retrieval") {
+          if (event.results && event.results.length) showEvidence(wrap, event);
+          (event.warnings || []).forEach((warning) => note(wrap, warning));
+        } else if (event.type === "warning") {
+          note(wrap, event.message);
+        } else if (event.type === "error") {
+          note(wrap, "错误：" + event.error + (event.hint ? "\n提示：" + event.hint : ""), true);
+        }
+      }
+    }
+  } catch (err) {
+    note(wrap, "连接中断：" + err, true);
+  } finally {
+    if (answer.trim()) state.messages.push({ role: "assistant", content: answer });
+    state.busy = false;
+    sendButton.disabled = false;
+    sendButton.textContent = "发送";
+  }
+}
+
+$("send").addEventListener("click", send);
+$("refresh").addEventListener("click", refreshStatus);
+$("clear").addEventListener("click", () => {
+  state.messages = [];
+  $("log").replaceChildren();
+});
+$("provider").addEventListener("change", () => fillModels(""));
+$("token").addEventListener("change", (event) => {
+  state.token = event.target.value.trim();
+  localStorage.setItem("agent_token", state.token);
+  $("autherr").textContent = "";
+});
+$("input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    send();
+  }
+});
+$("input").addEventListener("input", (event) => {
+  event.target.style.height = "auto";
+  event.target.style.height = Math.min(event.target.scrollHeight, 180) + "px";
+});
+
+loadConfig().catch((err) => {
+  const chip = $("status");
+  chip.className = "chip bad";
+  chip.textContent = "配置加载失败：" + err;
+});
+</script>
+</body>
+</html>

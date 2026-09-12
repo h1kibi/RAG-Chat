@@ -1,0 +1,100 @@
+﻿{
+  "name": "cybersec",
+  "display_name": "网络安全、渗透测试与 CTF",
+  "purpose": "用于授权安全测试、隔离靶场学习、CTF 复盘和防守研究的本地知识库。",
+  "authorized_use": "仅限获得授权的系统、隔离靶场、CTF 竞赛和防守研究；不得用于未授权访问、数据窃取或规避检测。",
+  "language": "zh-CN",
+  "categories": [
+    "foundations",
+    "web_security",
+    "network_security",
+    "linux_windows",
+    "vulnerability_analysis",
+    "authorized_pentest",
+    "ctf",
+    "defense_and_incident_response",
+    "ctf_des_knowledge",
+    "hacktricks",
+    "payloads_all_the_things",
+    "lolbas",
+    "security_learning",
+    "xianzhi",
+    "ctf_wp",
+    "butian"
+  ],
+  "seed_documents": [
+    "00_foundations/security-foundations.md",
+    "01_web_security/web-security-methodology.md",
+    "02_network_security/network-enumeration-and-defense.md",
+    "03_linux_windows/linux-windows-security-basics.md",
+    "04_vulnerability/vulnerability-analysis-and-remediation.md",
+    "05_pentest_method/authorized-pentest-workflow.md",
+    "06_ctf/ctf-analysis-playbook.md",
+    "07_defense/detection-and-incident-response.md"
+  ],
+  "metadata_fields": [
+    "topic",
+    "difficulty",
+    "source",
+    "authorized_only",
+    "updated_at"
+  ],
+  "external_sources": [
+    {
+      "name": "Des-CTF-Knowledge",
+      "repository": "local://MyDB/Des-CTF-Knowledge",
+      "category": "08_ctf_des_knowledge",
+      "filter": "markdown-only-no-index-files-no-executables",
+      "license_notice": "Preserve upstream license and attribution metadata"
+    },
+    {
+      "name": "HackTricks",
+      "repository": "local://MyDB/hacktricks",
+      "category": "09_hacktricks",
+      "filter": "markdown-only-no-index-files-no-executables-strip-src",
+      "license_notice": "Preserve upstream license and attribution metadata"
+    },
+    {
+      "name": "PayloadsAllTheThings",
+      "repository": "local://MyDB/PayloadsAllTheThings",
+      "category": "10_payloads_all_the_things",
+      "filter": "markdown-and-txt-payloads-only-no-executables",
+      "license_notice": "Preserve upstream license and attribution metadata"
+    },
+    {
+      "name": "LOLBAS",
+      "repository": "local://MyDB/LOLBAS",
+      "category": "11_lolbas",
+      "filter": "markdown-and-yaml-only-no-executables",
+      "license_notice": "Preserve local source attribution and license metadata"
+    },
+    {
+      "name": "Security-Learning",
+      "repository": "local://MyDB/Security-Learning",
+      "category": "12_security_learning",
+      "filter": "markdown-only-no-executables",
+      "license_notice": "Preserve local source attribution metadata"
+    },
+    {
+      "name": "xianzhi",
+      "repository": "local://MyDB/xianzhi",
+      "category": "13_xianzhi",
+      "filter": "markdown-only-no-executables",
+      "license_notice": "Preserve local source attribution metadata"
+    },
+    {
+      "name": "CTF-WP",
+      "repository": "local://MyDB/CTF-WP",
+      "category": "14_ctf_wp",
+      "filter": "markdown-and-plain-text-no-executables",
+      "license_notice": "Preserve local source attribution metadata"
+    },
+    {
+      "name": "butian",
+      "repository": "local://MyDB/butian",
+      "category": "15_butian",
+      "filter": "markdown-only-no-executables",
+      "license_notice": "Preserve local source attribution metadata"
+    }
+  ]
+}

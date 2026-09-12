@@ -1,0 +1,51 @@
+# Runtime and data roots (never commit local corpora or indexes)
+C:/RAG-Agent-Data/
+data/
+sources/
+
+# Vendored upstream used only to build the index; see README "构建索引"
+LangGraph-Chatchat/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# Test / coverage output
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini
+
+# Secrets — API keys are read from the environment, never from files
+.env
+.env.*
+*.key
+*.pem
