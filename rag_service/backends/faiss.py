@@ -27,6 +27,8 @@ from rag_service.relevance import (
     fusion_score,
     identifier_tokens,
     image_references,
+    past_event_flags,
+    source_origin,
     is_near_duplicate,
     low_information_reasons,
     parse_provenance_frontmatter,
@@ -178,6 +180,77 @@ def describe_status(status: Dict[str, Any]) -> str:
         f"dense_path={path}{where}: "
         f"{_path_detail(path, status.get('sq8_state'))}{extra}"
     )
+
+
+def _image_availability(
+    images: list[Dict[str, Any]], document_path: Path | None
+) -> list[Dict[str, Any]]:
+    """Say how each referenced image can actually be obtained.
+
+    A markdown writeup points at `images/foo.png` relative to itself, and the
+    importer deliberately excludes binaries and `images/` directories, so those
+    references resolve to nothing: measured over this corpus, 0 image files and 0
+    `images` directories exist under `content/`, against 20,464 text files. A
+    remote URL is fetchable as-is.
+
+    Reporting only a count left the caller to discover that, which is why the
+    reviewer read it as a missing visual channel. The honest answer is that the
+    evidence is not in the corpus at all and has to come from the upstream
+    source, so each entry states which case it is.
+    """
+    if not images:
+        return images
+    out = []
+    for item in images:
+        src = str(item.get("src") or "")
+        entry = dict(item)
+        if src.startswith(("http://", "https://")):
+            entry["available"] = "remote"
+        else:
+            candidate = (document_path.parent / src).resolve() if document_path else None
+            if candidate is not None and candidate.is_file():
+                entry["available"] = "local"
+                entry["path"] = str(candidate)
+            else:
+                # Not an error: the corpus is text-only by design.
+                entry["available"] = "not-imported"
+        out.append(entry)
+    return out
+
+
+def _annotate_evidence(
+    metadata: Dict[str, Any], content: str, document_path: Path | None = None
+) -> None:
+    """Attach the per-chunk signals every result path must carry.
+
+    Extracted because three of the four result builders (single-chunk retrieval,
+    source paging, and the lexical fallback) had drifted to reporting only the
+    screenshot count. That mattered most for `filters.chunk_id`, which exists to
+    verify a citation -- precisely where "this document quotes a past-event flag"
+    needs to be visible.
+    """
+    facts = extract_environment_facts(content)
+    if facts:
+        metadata["facts"] = facts
+    origin = source_origin(metadata.get("source") or metadata.get("source_path"))
+    if origin:
+        # Where the document came from, so a caller can weigh a maintained
+        # handbook against a blog mirror instead of seeing them as equals.
+        metadata["origin"] = origin
+    flags = past_event_flags(content)
+    if flags:
+        # Writeups quote the flag they captured: useful for reproducing the
+        # original challenge, misleading for a variant. Mark; the caller decides.
+        metadata["flags"] = flags
+    screenshots = screenshot_placeholders(content)
+    if screenshots:
+        # Strip-images keeps an alt-text placeholder, not the evidence, so the
+        # caller has to fetch the original -- and the addresses let a multimodal
+        # one actually read it.
+        metadata["has_screenshots"] = screenshots
+        images = _image_availability(image_references(content), document_path)
+        if images:
+            metadata["image_refs"] = images
 
 
 def paginate_entries(entries, cursor, page_size):
@@ -448,22 +521,9 @@ class FaissBackend(RetrievalBackend):
                 content, merged, merged_rows = _merge_adjacent_rows(
                     store, row, source, merge_limit, content
                 )
-            facts = extract_environment_facts(content)
-            if facts:
-                # Report observed versions/architectures so the caller can check
-                # them against the target instead of trusting the prose.
-                metadata["facts"] = facts
-            screenshots = screenshot_placeholders(content)
-            if screenshots:
-                # Strip-images keeps a placeholder, not the evidence. Say so, so
-                # the caller fetches the original file instead of hallucinating
-                # the step that lived in the picture. The addresses go along with
-                # the count: a text-only model ignores them, a multimodal caller
-                # can read the screenshot itself.
-                metadata["has_screenshots"] = screenshots
-                images = image_references(content)
-                if images:
-                    metadata["image_refs"] = images
+            # facts / flags / screenshot signals are attached by the shared
+            # helper, so every result path reports the same set.
+            _annotate_evidence(metadata, content, self._document_path(request, source))
             if request.extract:
                 # The caller asked for the material itself, so hand back whole
                 # fenced segments with their language rather than a query-centred
@@ -656,6 +716,24 @@ class FaissBackend(RetrievalBackend):
             ) from exc
         return _load_or_build_source_ranges(docs_path, rows)
 
+    def _document_path(
+        self, request: RetrievalRequest, source: str | None
+    ) -> Path | None:
+        """Absolute path of a cited document, for resolving its relative assets.
+
+        Markdown image references are relative to the document, so without this
+        the addresses in `image_refs` do not identify a file. `build_cosine`
+        mirrors the content tree under `<kb_root>/<kb>/content`, which is where
+        the source paths point.
+        """
+        if not source:
+            return None
+        knowledge_base = request.knowledge_base or self.config.default_knowledge_base
+        candidate = (
+            self.config.knowledge_base_root / knowledge_base / "content" / source
+        )
+        return candidate if candidate.is_file() else None
+
     def _browse_chunk(self, request: RetrievalRequest, chunk_id: str) -> List[SearchResult]:
         """Return exactly the cited chunk, so a citation can be verified.
 
@@ -690,12 +768,10 @@ class FaissBackend(RetrievalBackend):
             metadata["provenance"] = provenance
         content = strip_provenance_frontmatter(content)
         strip_images = request.strip_images if request.strip_images is not None else self.config.strip_images
-        screenshots = screenshot_placeholders(content)
+        _annotate_evidence(metadata, content, self._document_path(request, source))
         if strip_images:
             content = strip_markdown_images(content)
         metadata.update({"browse": True, "chunk": True})
-        if screenshots:
-            metadata["has_screenshots"] = screenshots
         snippet_chars = (
             request.snippet_chars
             if request.snippet_chars is not None
@@ -793,11 +869,9 @@ class FaissBackend(RetrievalBackend):
             if request.strip_images is not None
             else self.config.strip_images
         )
-        screenshots = screenshot_placeholders(content)
+        _annotate_evidence(metadata, content, self._document_path(request, source))
         if strip_images:
             content = strip_markdown_images(content)
-        if screenshots:
-            metadata["has_screenshots"] = screenshots
         max_chars = request.snippet_chars
         if max_chars is None:
             max_chars = self.config.snippet_chars
@@ -1120,11 +1194,9 @@ class FaissBackend(RetrievalBackend):
                 if request.strip_images is not None
                 else self.config.strip_images
             )
-            screenshots = screenshot_placeholders(content)
+            _annotate_evidence(metadata, content, self._document_path(request, source))
             if strip_images:
                 content = strip_markdown_images(content)
-            if screenshots:
-                metadata["has_screenshots"] = screenshots
             snippet_chars = (
                 request.snippet_chars
                 if request.snippet_chars is not None

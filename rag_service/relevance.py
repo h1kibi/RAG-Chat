@@ -572,3 +572,112 @@ def extract_segments(text: str, kind: str = "code", max_segments: int = 8) -> li
         if len(out) >= max_segments:
             break
     return out
+
+
+# --- Past-event flags --------------------------------------------------------
+#
+# Writeups quote the flag they captured. That is useful for reproducing the
+# original challenge and actively misleading for a variant: a solver that has
+# the flag shown to it will try to make it fit. The service cannot know which
+# case it is in, so it marks what it found and leaves the judgement to the
+# caller. Marking, not removing -- redaction would break the reproduction case.
+#
+# Measured over 60k corpus rows: 2983 candidates, dominated by `flag{...}` (934)
+# and event names (`dasctf`, `actf`, `ductf`, `lactf`, ...). The only common
+# false positives are language keywords, listed below.
+
+_FLAG_CANDIDATE_RE = re.compile(r"(?<!\\)\b([A-Za-z][A-Za-z0-9_]{1,23})\{([^{}\n]{8,120})\}")
+
+_CODE_PREFIXES = frozenset({
+    "if", "else", "elif", "for", "while", "switch", "case", "catch", "finally",
+    "try", "do", "return", "function", "func", "def", "class", "struct", "union",
+    "enum", "template", "namespace", "foreach", "with", "lambda", "match",
+    "default", "import", "from", "new", "let", "var", "const", "identifier",
+    "printf", "sprintf", "format", "echo", "select", "insert", "update", "delete",
+    "where", "table", "index", "create", "alter", "values", "print", "range",
+    "input", "output", "begin", "end", "text", "label", "ref", "cite", "section",
+    "sleep", "success", "error", "debug", "info", "warn", "trace", "stdout",
+})
+"""Prefixes that are syntax rather than an event name.
+
+Measured over 60k corpus rows: `else` and `try` were the only frequent ones (117
+and 23); `\begin{document}`-style LaTeX and `input{...}` were the other visible
+false positives, which is why backslash-preceded candidates and these names are
+excluded.
+"""
+
+_FLAG_BODY_RE = re.compile(r"^[A-Za-z0-9_!@#$%^&*\-+=:.?~]{8,}$")
+_PLAIN_WORD_RE = re.compile(r"^[a-z]+$")
+"""A body with no uppercase, digit or punctuation, and short, is prose or code.
+
+`processes` and `document` were the observed false positives; real flags in the
+survey either mix case (`YouKnowHowToFuzz!`), carry digits (`12qwaszxcde3`) or
+use punctuation (`_tihne__ifnlfaign_igtoyt`).
+"""
+
+
+def past_event_flags(text: str, limit: int = 6) -> list[str]:
+    """Flag-shaped strings a document quotes, for the caller to sanity-check.
+
+    Tuned for recall: a flag this misses is a solver that silently copies a
+    past-event answer, while a code snippet marked by mistake only adds a line
+    of caution. Language keywords and bodies that are plainly source code are
+    filtered because they were the measured false positives.
+    """
+    if not text or "{" not in text:
+        return []
+    out: list[str] = []
+    for match in _FLAG_CANDIDATE_RE.finditer(text):
+        prefix, body = match.group(1), match.group(2)
+        if prefix.lower() in _CODE_PREFIXES:
+            continue
+        if not _FLAG_BODY_RE.match(body):
+            continue
+        if _PLAIN_WORD_RE.match(body):
+            continue
+        candidate = f"{prefix}{{{body}}}"
+        if candidate not in out:
+            out.append(candidate)
+        if len(out) >= limit:
+            break
+    return out
+
+
+# --- Provenance tier ---------------------------------------------------------
+#
+# The corpus mixes maintained reference material, competition writeups and
+# community blog mirrors, and they ranked indistinguishably. Reported from agent
+# use: "镜像博客（先知/补天）、HackTricks、赛事 writeup 平权混排".
+#
+# This is a factual statement about where a source came from, not a quality
+# score. A blog mirror can be the better writeup; the caller just deserves to
+# know which kind of thing it is holding. Derived from the first path segment,
+# which build_cosine records as the source's category.
+
+_ORIGIN_BY_CATEGORY = {
+    "08_ctf_des_knowledge": "handbook",
+    "09_hacktricks": "handbook",
+    "10_payloads_all_the_things": "handbook",
+    "11_lolbas": "handbook",
+    "12_security_learning": "blog-mirror",
+    "13_xianzhi": "blog-mirror",
+    "15_butian": "blog-mirror",
+    "14_ctf_wp": "writeup",
+}
+"""Category → provenance kind.
+
+The curated `00_`-`07_` templates are the repository's own seed documents, so
+they are `curated` rather than any of the imported kinds.
+"""
+
+
+def source_origin(source: str | None) -> str | None:
+    """Classify a source path by where it came from, or ``None`` if unknown."""
+    if not source:
+        return None
+    category = str(source).replace("\\", "/").split("/", 1)[0]
+    if category in _ORIGIN_BY_CATEGORY:
+        return _ORIGIN_BY_CATEGORY[category]
+    if category[:2].isdigit() and int(category[:2]) < 8:
+        return "curated"
+    return None

@@ -127,18 +127,14 @@ class RagService:
                     f"top result score is low ({top_score:.3f} < {self.config.low_score_warn:.2f}); "
                     "the query may be too vague, out of corpus, or matching only noise"
                 )
-            elif response.confidence == "semantic":
-                # Only reached once the hit has cleared the coarse filter: the
-                # interesting failure is a match that *looks* confident by score
-                # (the measured 0.49-0.55 band where off-corpus probes land) but
-                # shares no term with the query. Below the threshold the low-score
-                # warning is the honest message, and saying both would be noise.
-                response.warnings.append(
-                    "top result matched on meaning alone: it shares no distinctive term "
-                    "with the query. Confirm the topic against the cited source before "
-                    "relying on it, or retry with concrete anchors (software + version + "
-                    "mechanism)."
-                )
+            # No warning for the "neither anchored nor lexical" case. Reported
+            # from real agent use: the previous message fired on 3 of 16 correct
+            # hits, and agents treated it as a veto and discarded good evidence.
+            # The measurement behind it was aggregate, not per-item -- a correct
+            # hit scored lexical 0.355 while a genuinely off-corpus one scored
+            # 0.353, so lexical support cannot grade an individual result either.
+            # The field now only states positive evidence; silence is not a
+            # verdict, and the low-score warning above still covers weak hits.
         return response
 
     def _confidence(self, request: RetrievalRequest, results: List) -> str | None:
@@ -161,10 +157,15 @@ class RagService:
         lexical = (top.metadata or {}).get("lexical_score")
         if not isinstance(lexical, (int, float)):
             # No lexical component was computed (dense-only mode, or a backend
-            # that does not emit one). Absence of the signal is not evidence the
-            # match was semantic, so decline to grade rather than guess.
+            # that does not emit one). Absence of a signal is not evidence about
+            # the match, so decline to grade rather than guess.
             return None
-        return "lexical" if lexical >= 0.5 else "semantic"
+        if lexical >= 0.5:
+            return "lexical"
+        # Neither signal holds. Report nothing: with the measured overlap
+        # (correct 0.355 vs off-corpus 0.353) a "weak" verdict would be a guess
+        # dressed as a finding.
+        return None
 
     def _lexical_weight_warning(self, request: RetrievalRequest) -> str | None:
         """Explain how a raised ``lexical_weight`` moves the score gate.

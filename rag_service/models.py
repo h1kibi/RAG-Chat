@@ -261,8 +261,22 @@ def _format_signals(metadata: Any) -> str:
         refs = metadata.get("image_refs")
         if isinstance(refs, list) and refs:
             # Only the addresses: the caller either can read the image or will
-            # ignore them, and the alt text is already in the content.
-            parts.append("images=" + ",".join(str(item.get("src", "")) for item in refs[:4]))
+            # ignore them, and the alt text is already in the content. The
+            # availability marker matters -- a relative reference is not in the
+            # corpus (binaries are excluded at import), so trying to open it
+            # wastes a step.
+            available = [item for item in refs if item.get("available") == "local"
+                         or item.get("available") == "remote"]
+            rendered = ",".join(str(item.get("src", "")) for item in refs[:4])
+            if not available:
+                rendered += " (not in corpus: text-only import; fetch from upstream)"
+            parts.append("images=" + rendered)
+    origin = metadata.get("origin")
+    if isinstance(origin, str) and origin:
+        parts.append(f"origin={origin}")
+    flags = metadata.get("flags")
+    if isinstance(flags, list) and flags:
+        parts.append(f"past_event_flags={len(flags)}")
     if metadata.get("degraded"):
         parts.append(f"degraded={metadata['degraded']}")
     return " " + " ".join(parts) if parts else ""
@@ -303,10 +317,11 @@ class RetrievalResponse(BaseModel):
     )
     confidence: Optional[str] = Field(
         default=None,
-        description="why the top hit should or should not be trusted: 'anchored' (a "
-        "query identifier such as a CVE or version appears in the winning document), "
-        "'lexical' (strong word-level support), or 'semantic' (matched on meaning "
-        "alone, sharing no distinctive term with the query)",
+        description="positive evidence for the top hit, or None when there is none: "
+        "'anchored' (an identifier from the query, such as a CVE or version, appears in "
+        "the winning document) or 'lexical' (strong word-level support). Absence is not "
+        "a verdict -- the two distributions overlap, so no value here means 'could not "
+        "confirm', never 'wrong'.",
     )
     degraded: Optional[str] = Field(
         default=None,

@@ -322,8 +322,10 @@ WARNINGS:
 - `shots=N`：正文包含 N 个图片引用，文字结果可能缺少图片中的证据；
 - `DEGRADED (lexical-only)`：embedding provider 不可用，分数是 lexical 分，不是 cosine；
 - `no_match=true`：本次没有结果，不代表语料一定没有该主题；
-- `conf=anchored|lexical|semantic`：首行给出命中置信度。`semantic` 表示只按语义匹配、与查询不共享特征词，应核对来源后再采信；
-- `images=<地址,…>`：该块含图片（`shots=N`）时给出图片地址，供有视觉能力的调用方二次读取。
+- `conf=anchored|lexical`：首行给出**正向**证据，缺省表示无法判定（不是「有错」）；
+- `origin=handbook|writeup|blog-mirror|curated`：来源类别（来源事实，非质量评分）；
+- `images=<地址,…>`：图片可获取性——远端 URL 可直接取；相对路径会标注 `not in corpus`，因为导入按设计排除二进制，需回上游获取；
+- `past_event_flags=N`：该块抄录了往届 flag（`metadata.flags` 有原文）。复现原题可用，变体题切勿照抄；
 
 ## 10. CTF Agent 使用流程
 
@@ -412,5 +414,5 @@ cd <repo>
 当前验收基线：
 
 ```text
-387 tests OK
+401 tests OK
 ```
