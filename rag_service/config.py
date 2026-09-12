@@ -97,7 +97,7 @@ class RagConfig:
 
     def vector_store_path(self, knowledge_base: str, embedding_model: str) -> Path:
         if not self.is_allowed_knowledge_base(knowledge_base):
-            raise ValueError(f"knowledge base is not allowed: {knowledge_base}")
+            raise ValueError(f"knowledge base is not allowed: {self._explain_disallowed(knowledge_base)}")
         if not embedding_model or Path(embedding_model).name != embedding_model:
             raise ValueError("embedding_model must be a simple model name")
         vector_name = embedding_model.replace(":", "_").replace("/", "__")
@@ -144,6 +144,25 @@ class RagConfig:
         if not all(char.isalnum() or char in "_-" for char in name):
             return False
         return not self.allowed_knowledge_bases or name in self.allowed_knowledge_bases
+
+    def _explain_disallowed(self, name: str) -> str:
+        """Say which variable rejected the name, not just that it was rejected.
+
+        The agent and the retrieval service are configured by different variables
+        (`AGENT_RAG_KNOWLEDGE_BASE` vs `RAG_ALLOWED_KNOWLEDGE_BASES`), so a
+        mismatch surfaces here. "not allowed: cybersec" leaves the operator
+        guessing which of the two is wrong.
+        """
+        if self.allowed_knowledge_bases:
+            allowed = ", ".join(sorted(self.allowed_knowledge_bases))
+            return (
+                f"{name!r} is not in the allow-list ({allowed}); add it to "
+                f"RAG_ALLOWED_KNOWLEDGE_BASES, or point the caller at one of those"
+            )
+        return (
+            f"{name!r} is not a usable knowledge base name (letters, digits, "
+            "'_', '-' only)"
+        )
 
     def content_categories(self, knowledge_base: str) -> list[str]:
         """Return indexed content prefixes (first path segment) for a KB."""
