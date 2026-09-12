@@ -66,7 +66,30 @@ def dense_path(store: Dict[str, Any]) -> str:
     return "sq8" if store.get("sq8") is not None else "numpy"
 
 
-def _path_detail(path: str) -> str:
+def _sq8_state(store: Dict[str, Any] | None) -> str:
+    """Whether the sq8 artifact a numpy fallback implies is absent or unusable.
+
+    The distinction matters because the remedies differ: an absent artifact is
+    fixed by build_cosine, while a present-but-unreadable one is not (build_cosine
+    reports the artifacts as current and exits without touching it) — the usual
+    cause is a corrupt file or a process that could not map it for lack of
+    memory, which is exactly when the numpy fallback appears.
+    """
+    if not store:
+        return "unknown"
+    docs_path = store.get("docs_path")
+    if docs_path is None:
+        return "unknown"
+    try:
+        sq8_path = Path(docs_path).with_name("vectors.cos.sq8")
+    except TypeError:
+        return "unknown"
+    if not sq8_path.is_file() or sq8_path.stat().st_size == 0:
+        return "missing"
+    return "unreadable"
+
+
+def _path_detail(path: str, sq8_state: str | None = None) -> str:
     if path == "sq8":
         return "faiss int8 scalar quantizer"
     if path == "numpy":
@@ -75,6 +98,14 @@ def _path_detail(path: str) -> str:
                 "numpy dequantization because faiss is not importable in this interpreter — "
                 "expect roughly 20x slower scans; run under the repository virtualenv "
                 "(.venv/Scripts/python.exe)"
+            )
+        if sq8_state == "unreadable":
+            return (
+                "numpy dequantization because the sq8 artifact exists but could not be "
+                "loaded (corrupt, or this process lacked the memory to map it) — rebuild "
+                "it with `python -m rag_service.build_cosine --force`, and check available "
+                "memory; re-running without --force reports the artifacts as current and "
+                "changes nothing"
             )
         return (
             "numpy dequantization because the sq8 artifact is missing — rebuild with "
@@ -93,7 +124,10 @@ def describe_dense_path(store: Dict[str, Any]) -> str | None:
     if path in _LOGGED_PATHS:
         return None
     _LOGGED_PATHS.add(path)
-    return f"dense_path={path} rows={int(store['vectors'].shape[0])}: {_path_detail(path)}"
+    return (
+        f"dense_path={path} rows={int(store['vectors'].shape[0])}: "
+        f"{_path_detail(path, _sq8_state(store))}"
+    )
 
 
 def describe_status(status: Dict[str, Any]) -> str:
@@ -109,7 +143,10 @@ def describe_status(status: Dict[str, Any]) -> str:
     extra = ""
     if not status.get("postings", True):
         extra = " postings=missing (identifier recall disabled; rebuild build_cosine)"
-    return f"dense_path={path}{where}: {_path_detail(path)}{extra}"
+    return (
+        f"dense_path={path}{where}: "
+        f"{_path_detail(path, status.get('sq8_state'))}{extra}"
+    )
 
 
 def paginate_entries(entries, cursor, page_size):
@@ -913,6 +950,9 @@ class FaissBackend(RetrievalBackend):
             status["dense_path"] = dense_path(store)
             status["rows"] = int(store["vectors"].shape[0])
             status["postings"] = _open_postings(store["docs_path"]) is not None
+            # Why the numpy scan is in use: an absent artifact and an unreadable
+            # one need different remedies, and build_cosine only fixes the first.
+            status["sq8_state"] = _sq8_state(store)
         except Exception as exc:
             status["dense_path"] = "unavailable"
             status["error"] = type(exc).__name__

@@ -6,6 +6,26 @@ from pathlib import Path
 from typing import FrozenSet, Optional
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number, got {raw!r}") from exc
+
+
 @dataclass(frozen=True)
 class RagConfig:
     """Runtime policy for the standalone retrieval service.
@@ -200,35 +220,35 @@ class RagConfig:
         return cls(
             knowledge_base_root=Path(root_value),
             default_knowledge_base=os.getenv("RAG_DEFAULT_KNOWLEDGE_BASE", "cybersec"),
-            default_top_k=int(os.getenv("RAG_DEFAULT_TOP_K", "5")),
-            default_score_threshold=float(os.getenv("RAG_DEFAULT_SCORE_THRESHOLD", "0.45")),
-            max_top_k=int(os.getenv("RAG_MAX_TOP_K", "50")),
-            filtered_candidate_limit=int(os.getenv("RAG_FILTERED_CANDIDATE_LIMIT", "1200")),
-            candidate_pool=int(os.getenv("RAG_CANDIDATE_POOL", "600")),
-            path_recall_limit=int(os.getenv("RAG_PATH_RECALL_LIMIT", "400")),
-            path_recall_rows_per_path=int(os.getenv("RAG_PATH_RECALL_ROWS_PER_PATH", "2")),
-            identifier_recall_limit=int(os.getenv("RAG_IDENTIFIER_RECALL_LIMIT", "40")),
+            default_top_k=_env_int("RAG_DEFAULT_TOP_K", 5),
+            default_score_threshold=_env_float("RAG_DEFAULT_SCORE_THRESHOLD", 0.45),
+            max_top_k=_env_int("RAG_MAX_TOP_K", 50),
+            filtered_candidate_limit=_env_int("RAG_FILTERED_CANDIDATE_LIMIT", 1200),
+            candidate_pool=_env_int("RAG_CANDIDATE_POOL", 600),
+            path_recall_limit=_env_int("RAG_PATH_RECALL_LIMIT", 400),
+            path_recall_rows_per_path=_env_int("RAG_PATH_RECALL_ROWS_PER_PATH", 2),
+            identifier_recall_limit=_env_int("RAG_IDENTIFIER_RECALL_LIMIT", 40),
             lexical_fallback=os.getenv("RAG_LEXICAL_FALLBACK", "1").lower()
             not in {"0", "false", "no"},
-            document_cache_limit=int(os.getenv("RAG_DOCUMENT_CACHE_LIMIT", "2048")),
-            embedding_failure_ttl=float(os.getenv("RAG_EMBEDDING_FAILURE_TTL", "30")),
-            store_cache_limit=int(os.getenv("RAG_STORE_CACHE_LIMIT", "3")),
-            max_query_length=int(os.getenv("RAG_MAX_QUERY_LENGTH", "8000")),
+            document_cache_limit=_env_int("RAG_DOCUMENT_CACHE_LIMIT", 2048),
+            embedding_failure_ttl=_env_float("RAG_EMBEDDING_FAILURE_TTL", 30),
+            store_cache_limit=_env_int("RAG_STORE_CACHE_LIMIT", 3),
+            max_query_length=_env_int("RAG_MAX_QUERY_LENGTH", 8000),
             allowed_knowledge_bases=allowed,
             embedding_model=os.getenv("RAG_EMBEDDING_MODEL") or "bge-m3",
             ollama_base_url=os.getenv("RAG_OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
-            embedding_timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT", "120")),
+            embedding_timeout=_env_float("RAG_EMBEDDING_TIMEOUT", 120),
             embedding_keep_alive=os.getenv("RAG_EMBEDDING_KEEP_ALIVE", "30m"),
-            lexical_weight=float(os.getenv("RAG_LEXICAL_WEIGHT", "0.35")),
+            lexical_weight=_env_float("RAG_LEXICAL_WEIGHT", 0.35),
             merge_neighbors=os.getenv("RAG_MERGE_NEIGHBORS", "1").lower() not in {"0", "false", "no"},
-            merge_neighbor_limit=int(os.getenv("RAG_MERGE_NEIGHBOR_LIMIT", "2")),
+            merge_neighbor_limit=_env_int("RAG_MERGE_NEIGHBOR_LIMIT", 2),
             low_info_filter=os.getenv("RAG_LOW_INFO_FILTER", "1").lower() not in {"0", "false", "no"},
             strip_images=os.getenv("RAG_STRIP_IMAGES", "1").lower() not in {"0", "false", "no"},
             strip_provenance=os.getenv("RAG_STRIP_PROVENANCE", "1").lower()
             not in {"0", "false", "no"},
-            snippet_chars=int(os.getenv("RAG_SNIPPET_CHARS", "800")),
-            max_content_chars=int(os.getenv("RAG_MAX_CONTENT_CHARS", "8000")),
+            snippet_chars=_env_int("RAG_SNIPPET_CHARS", 800),
+            max_content_chars=_env_int("RAG_MAX_CONTENT_CHARS", 8000),
             filter_flag_attachments=os.getenv("RAG_FILTER_FLAG_ATTACHMENTS", "1").lower()
             not in {"0", "false", "no"},
-            low_score_warn=float(os.getenv("RAG_LOW_SCORE_WARN", "0.55")),
+            low_score_warn=_env_float("RAG_LOW_SCORE_WARN", 0.55),
         )

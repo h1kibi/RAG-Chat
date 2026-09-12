@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Fixed — 第五轮质检（错误话术与诊断真实性）
+
+- **CLI 把配置错误抛成回溯**：`RAG_KB_ROOT` 未设置（第一次运行最常犯的错）时打印十行回溯并
+  以 1 退出，而文档承诺的是字段级错误 + 退出码 2。配置与 backend 构造现在也在错误处理内。
+  顺带给 `rag_service` 的 ~18 个数值环境变量加上具名解析：`RAG_DEFAULT_TOP_K=abc` 现在报
+  `RAG_DEFAULT_TOP_K must be an integer, got 'abc'`，而不是 `invalid literal for int()`（后者
+  不说是哪个变量）。
+- **sq8 降级原因说错**：任何 numpy 回退都被解释成「sq8 产物缺失」，但当产物**存在却读不出来**
+  （文件损坏，或进程内存不足无法映射——这正是实测中触发 numpy 慢路径的情形）时，
+  建议的 `build_cosine` 会回答「产物已是最新」而什么都不修。现在区分三种状态：缺失
+  （指向 build_cosine）、存在但不可读（指向 `--force` 并提示检查内存）、以及正常走 sq8。
+
+测试从 311 增至 317：新增 `tests/test_cli_diagnostics.py`（CLI 错误契约、sq8 三态诊断），
+两个修复都在回退后确认测试确实失败。
+
 ### Fixed — 第四轮质检（对抗性 + 全流程复检）
 
 **健康检查是本轮重灾区**（上一轮我自己刚改过的代码）：
@@ -45,6 +60,8 @@ base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以�
 
 测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
 补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
+
+五轮累计：280 → 317 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
 
 ### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
 

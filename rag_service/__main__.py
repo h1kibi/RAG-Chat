@@ -131,9 +131,14 @@ def run_search(args: argparse.Namespace) -> int:
 
     if args.kb_root:
         os.environ["RAG_KB_ROOT"] = args.kb_root
-    config = RagConfig.from_environment()
-    backend = FaissBackend(config)
+    backend = None
     try:
+        # Config and backend construction belong inside the handler too: an
+        # unset RAG_KB_ROOT is the most common first-run mistake, and it used to
+        # surface as a ten-line traceback with exit 1 instead of the documented
+        # usage error.
+        config = RagConfig.from_environment()
+        backend = FaissBackend(config)
         response = RagService(config, backend).search(build_request(args))
     except (ValueError, ValidationError) as exc:
         # Every other entry point translates these into a field-level message
@@ -146,7 +151,8 @@ def run_search(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 3
     finally:
-        backend.close()
+        if backend is not None:
+            backend.close()
     if args.json:
         print(json.dumps(response.model_dump(), ensure_ascii=False, indent=2))
     else:
