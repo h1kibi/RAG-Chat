@@ -57,7 +57,7 @@ class EvidenceFormattingTests(unittest.TestCase):
                     "chunk_id": "cybersec:12",
                     "score": 0.8123,
                     "content": "tcache poisoning detail",
-                    "metadata": {"facts": "glibc=2.31"},
+                    "metadata": {"facts": {"glibc": ["2.31"], "arch": ["amd64"]}},
                 },
                 {
                     "source": "09_hacktricks/1.md",
@@ -73,8 +73,20 @@ class EvidenceFormattingTests(unittest.TestCase):
         text = format_evidence(self._response(), 4_000)
         self.assertIn("source=14_ctf_wp/by-year/2014/booty.md", text)
         self.assertIn("chunk_id=cybersec:12", text)
-        self.assertIn("glibc=2.31", text)
+        self.assertIn("glibc=2.31 arch=amd64", text)
         self.assertIn("tcache poisoning detail", text)
+
+    def test_environment_facts_are_rendered_not_dumped_as_a_mapping(self):
+        # `metadata.facts` is a mapping; interpolating it directly would paste a
+        # Python dict repr into the prompt.
+        text = format_evidence(self._response(), 4_000)
+        self.assertNotIn("{'glibc'", text)
+        self.assertNotIn('"glibc"', text)
+
+    def test_a_missing_fact_set_adds_nothing_to_the_header(self):
+        text = format_evidence(self._response(), 4_000)
+        second = [block for block in text.split("\n\n") if block.startswith("[2]")][0]
+        self.assertTrue(second.startswith("[2] source=09_hacktricks/1.md"), second)
 
     def test_evidence_is_numbered_so_the_model_can_refer_to_it(self):
         text = format_evidence(self._response(), 4_000)

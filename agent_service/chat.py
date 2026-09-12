@@ -67,6 +67,8 @@ def trim_history(messages: Sequence[ChatMessage], history_len: int) -> List[Chat
 
 def format_evidence(response: Dict[str, Any], limit_chars: int) -> str:
     """Render retrieval results as numbered, citable blocks for the prompt."""
+    from rag_service.models import _format_facts
+
     results = response.get("results") or []
     if not results or limit_chars <= 0:
         return ""
@@ -77,9 +79,10 @@ def format_evidence(response: Dict[str, Any], limit_chars: int) -> str:
             f"[{index}] source={result.get('source', 'unknown')} "
             f"chunk_id={result.get('chunk_id', '?')} score={result.get('score', 0):.3f}"
         )
-        facts = (result.get("metadata") or {}).get("facts")
-        if facts:
-            header = f"{header} {facts}"
+        # Reuse the retrieval layer's renderer so the version/arch/CVE facts the
+        # evidence states appear verbatim next to the citation, in the same form
+        # the MCP tool text uses. Metadata `facts` is a mapping, not a string.
+        header += _format_facts((result.get("metadata") or {}).get("facts"))
         content = (result.get("content") or "").strip()
         block = f"{header}\n{content}"
         remaining = limit_chars - used
@@ -121,8 +124,7 @@ async def retrieve_evidence(
     """Run retrieval for this turn.
 
     Returns the prompt-ready evidence text and the response payload for the UI
-    (so citations can be rendered), plus a warning string when retrieval failed.
-    A failed retrieval degrades to a plain chat answer instead of an error page:
+    (so citations can be rendered). A failed retrieval is handled by the caller:
     a broken index must not make the offline agent unusable.
     """
     from agent_service.rag import search_knowledge_base
