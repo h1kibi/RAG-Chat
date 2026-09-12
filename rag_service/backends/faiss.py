@@ -23,8 +23,10 @@ from rag_service.relevance import (
     LexicalReranker,
     QueryTerms,
     extract_environment_facts,
+    extract_segments,
     fusion_score,
     identifier_tokens,
+    image_references,
     is_near_duplicate,
     low_information_reasons,
     parse_provenance_frontmatter,
@@ -455,8 +457,22 @@ class FaissBackend(RetrievalBackend):
             if screenshots:
                 # Strip-images keeps a placeholder, not the evidence. Say so, so
                 # the caller fetches the original file instead of hallucinating
-                # the step that lived in the picture.
+                # the step that lived in the picture. The addresses go along with
+                # the count: a text-only model ignores them, a multimodal caller
+                # can read the screenshot itself.
                 metadata["has_screenshots"] = screenshots
+                images = image_references(content)
+                if images:
+                    metadata["image_refs"] = images
+            if request.extract:
+                # The caller asked for the material itself, so hand back whole
+                # fenced segments with their language rather than a query-centred
+                # window it would have to re-assemble.
+                segments = extract_segments(content, request.extract)
+                metadata["segments"] = segments
+                metadata["segment_kind"] = request.extract
+                if not segments:
+                    metadata["segments_empty"] = True
             strip_images = (
                 request.strip_images
                 if request.strip_images is not None
@@ -474,6 +490,10 @@ class FaissBackend(RetrievalBackend):
                 content = strip_provenance_frontmatter(content)
             if strip_images:
                 content = strip_markdown_images(content)
+            # `extract` asks for whole segments; windowing the content first would
+            # cut the fenced block the caller is after.
+            if request.extract:
+                snippet_chars = 0
             if snippet_chars and snippet_chars > 0 and len(content) > snippet_chars:
                 content = snippet_window(content, request.query, snippet_chars)
                 metadata["truncated"] = True

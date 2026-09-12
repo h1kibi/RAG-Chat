@@ -183,6 +183,7 @@ ctf_rag(
 | `merge_neighbors` | 是否合并相邻 chunk | 默认 true；需要原始单块时传 false |
 | `lexical_weight` | 词法融合权重 | 默认 0.35；调高会同时改变 threshold 语义 |
 | `strip_images` | 是否移除 Markdown 图片语法 | 默认 true；图片可能包含关键证据时传 false |
+| `extract` | 抽取围栏片段而非窗口切片 | `code`（全部）或 `payload`（仅可执行）；该模式不裁剪正文 |
 | `snippet_chars` | query-centered 片段上限 | 默认 800；传 `0` 关闭窗口，但仍受 `RAG_MAX_CONTENT_CHARS` 硬上限 |
 | `cursor` | browse 分页游标 | source listing 使用 source path；source 全文使用 `source:<row>` |
 
@@ -320,7 +321,9 @@ WARNINGS:
 - `truncated`：返回内容被截断；
 - `shots=N`：正文包含 N 个图片引用，文字结果可能缺少图片中的证据；
 - `DEGRADED (lexical-only)`：embedding provider 不可用，分数是 lexical 分，不是 cosine；
-- `no_match=true`：本次没有结果，不代表语料一定没有该主题。
+- `no_match=true`：本次没有结果，不代表语料一定没有该主题；
+- `conf=anchored|lexical|semantic`：首行给出命中置信度。`semantic` 表示只按语义匹配、与查询不共享特征词，应核对来源后再采信；
+- `images=<地址,…>`：该块含图片（`shots=N`）时给出图片地址，供有视觉能力的调用方二次读取。
 
 ## 10. CTF Agent 使用流程
 
@@ -409,5 +412,5 @@ cd <repo>
 当前验收基线：
 
 ```text
-359 tests OK
+387 tests OK
 ```

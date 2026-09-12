@@ -30,6 +30,7 @@ def create_langchain_tool(service: RagService, *, name: str = "search_knowledge_
         lexical_weight: Optional[float] = None,
         strip_images: Optional[bool] = None,
         snippet_chars: Optional[int] = None,
+        extract: Optional[str] = None,
         cursor: Optional[str] = None,
     ) -> str:
         from pydantic import ValidationError
@@ -48,6 +49,7 @@ def create_langchain_tool(service: RagService, *, name: str = "search_knowledge_
                 lexical_weight=lexical_weight,
                 strip_images=strip_images,
                 snippet_chars=snippet_chars,
+                extract=extract,
                 cursor=cursor,
             )
         except ValidationError as exc:
@@ -91,6 +93,13 @@ def create_openai_tool_schema(*, name: str = "search_knowledge_base", descriptio
                     "merge_neighbors": {"type": "boolean", "description": "default true; false returns single chunks"},
                     "lexical_weight": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.35},
                     "strip_images": {"type": "boolean", "description": "default true"},
+                    "extract": {
+                        "type": "string",
+                        "enum": ["code", "payload"],
+                        "description": "return discrete fenced segments instead of a "
+                        "windowed excerpt; 'code' keeps every block, 'payload' only "
+                        "runnable ones (language tag or command-shaped body)",
+                    },
                     "snippet_chars": {
                         "type": "integer",
                         "minimum": 0,

@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+_EXTRACT_MODES = frozenset({"code", "payload"})
+
 _RETRIEVAL_FILTER_KEYS = frozenset(
     {"category", "source_prefix", "source", "year", "exclude_source_prefix", "chunk_id"}
 )
@@ -65,6 +67,12 @@ class RetrievalRequest(BaseModel):
     merge_neighbors: Optional[bool] = Field(default=None)
     strip_images: Optional[bool] = Field(default=None)
     snippet_chars: Optional[int] = Field(default=None, ge=0, le=50_000)
+    extract: Optional[str] = Field(
+        default=None,
+        description="return discrete fenced segments instead of a windowed excerpt: "
+        "'code' keeps every fenced block, 'payload' keeps only runnable ones. Content is "
+        "not windowed in this mode, because the caller asked for whole segments.",
+    )
     limit: Optional[int] = Field(
         default=None,
         ge=1,
@@ -82,6 +90,22 @@ class RetrievalRequest(BaseModel):
     @classmethod
     def query_may_be_blank(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("extract")
+    @classmethod
+    def extract_must_be_a_known_mode(cls, value):
+        # An unknown mode would silently behave like None and return windowed
+        # excerpts, which the caller would read as "this document has no code".
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return None
+        if normalized not in _EXTRACT_MODES:
+            raise ValueError(
+                f"extract must be one of {', '.join(sorted(_EXTRACT_MODES))} (got {value!r})"
+            )
+        return normalized
 
     @field_validator("filters", mode="before")
     @classmethod
@@ -166,6 +190,32 @@ def _format_facts(facts: Any) -> str:
     return " " + " ".join(parts) if parts else ""
 
 
+def _render_segments(segments: list, content: str) -> str:
+    """Render extracted segments, each fenced and labelled, ahead of the prose.
+
+    A caller that asked for `extract` wants the runnable material; burying it in
+    the document text would put it back where it started. The surrounding content
+    still follows, so the segment keeps its context and the citation stays
+    verifiable.
+    """
+    if not segments:
+        return (
+            "(no matching segment in this document; the content below is the raw "
+            "evidence)\n" + content
+        )
+    blocks = []
+    for number, segment in enumerate(segments, start=1):
+        language = segment.get("language") or ""
+        body = segment.get("text") or ""
+        blocks.append(f"--- segment {number} [{language or 'unlabelled'}] ---\n{body}")
+    return (
+        f"EXTRACTED SEGMENTS ({len(segments)}):\n"
+        + "\n\n".join(blocks)
+        + "\n\n--- surrounding content ---\n"
+        + content
+    )
+
+
 def _format_signals(metadata: Any) -> str:
     """Render per-result advisory flags for the citation line.
 
@@ -208,6 +258,11 @@ def _format_signals(metadata: Any) -> str:
     shots = metadata.get("has_screenshots")
     if isinstance(shots, int) and shots > 0:
         parts.append(f"shots={shots}")
+        refs = metadata.get("image_refs")
+        if isinstance(refs, list) and refs:
+            # Only the addresses: the caller either can read the image or will
+            # ignore them, and the alt text is already in the content.
+            parts.append("images=" + ",".join(str(item.get("src", "")) for item in refs[:4]))
     if metadata.get("degraded"):
         parts.append(f"degraded={metadata['degraded']}")
     return " " + " ".join(parts) if parts else ""
@@ -245,6 +300,13 @@ class RetrievalResponse(BaseModel):
         default=True,
         description="wrap rendered evidence in an explicit untrusted-content envelope; the "
         "corpus contains prompt-injection and jailbreak payloads by design",
+    )
+    confidence: Optional[str] = Field(
+        default=None,
+        description="why the top hit should or should not be trusted: 'anchored' (a "
+        "query identifier such as a CVE or version appears in the winning document), "
+        "'lexical' (strong word-level support), or 'semantic' (matched on meaning "
+        "alone, sharing no distinctive term with the query)",
     )
     degraded: Optional[str] = Field(
         default=None,
@@ -286,12 +348,23 @@ class RetrievalResponse(BaseModel):
             score = "" if result.score is None else f" score={result.score:.4f}"
             content = result.content or ""
             identifier = f" chunk_id={chunk_id}" if chunk_id else ""
-            lines.append(
+            header = (
                 f"[{index}] source={source}{identifier}{score}"
                 f"{_format_provenance(result.metadata.get('provenance'))}"
                 f"{_format_facts(result.metadata.get('facts'))}"
-                f"{_format_signals(result.metadata)}\n{content}"
+                f"{_format_signals(result.metadata)}"
+                # Only meaningful for the top hit (it grades the best match),
+                # so it is carried on the first line rather than repeated.
+                + (f" conf={self.confidence}" if index == 1 and self.confidence else "")
             )
+            segments = result.metadata.get("segments")
+            if result.metadata.get("segment_kind") and isinstance(segments, list):
+                # Extraction mode: the caller asked for runnable material, so the
+                # segments come first and the surrounding prose is kept as
+                # context rather than being the answer.
+                lines.append(header + "\n" + _render_segments(segments, content))
+            else:
+                lines.append(f"{header}\n{content}")
         if self.results and self.results[-1].metadata.get("next_cursor"):
             lines.append(
                 f"(listing continues; pass cursor={self.results[-1].metadata['next_cursor']!r} "

@@ -17,7 +17,7 @@
 ├── knowledge-base/     知识库模板（Git 内，8 篇示例文档）
 ├── examples/demo-kb/   演示索引（93 KB），开箱即可查询
 ├── scripts/            建库与导入脚本
-└── tests/              359 个测试
+└── tests/              387 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -179,6 +179,24 @@ from rag_service.adapters import create_openai_tool_schema, dispatch_openai_tool
 
 `--filters` 可重复：`category`、`source_prefix`、`source`、`chunk_id`、`year`、`exclude_source_prefix`。
 
+**抽取模式**（`extract=code|payload`）：直接返回命中文档里的**围栏代码段**并标注语言，不再把
+query 窗口切片丢给 agent 自行拼接。`code` 收全部围栏，`payload` 只收可执行的（语言标注为
+shell/编程语言，或正文形如命令/exploit）。该模式下不做窗口裁剪，因为调用方要的是完整片段。
+文档内没有匹配片段时会明确说明，而不是返回空。CRLF 文档同样可抽取（Windows 写的 Markdown）。
+
+**命中置信度**（响应字段 `confidence`，并在工具文本首行以 `conf=` 呈现）：
+
+| 值 | 含义 |
+|---|---|
+| `anchored` | 查询里的标识符（CVE/版本/端口）出现在命中文档中 |
+| `lexical` | 词面支撑强（`lexical_score >= 0.5`） |
+| `semantic` | 仅语义匹配，与查询不共享特征词——**建议先核对来源再用** |
+
+实测依据：域外查询的词面分全部 ≤ 0.43，而相关命中在 0.16–1.00 之间；top1/top2 **分差不可用作
+置信度**（正确命中曾出现 0.0011 的分差，因为该主题被多篇不同文档覆盖，而域外查询在
+0.0039–0.0057），因此不使用分差。`semantic` 只在命中**已越过阈值**时提示——低于阈值时低分告警
+才是正确信息。
+
 ### HTTP 服务
 
 ```powershell
@@ -197,6 +215,7 @@ from rag_service.adapters import create_openai_tool_schema, dispatch_openai_tool
 - **路径过滤在打分前生效**：`category` / `source_prefix` / `source` 先用 source→行区间把候选收窄，再算相似度，窄过滤不会返回空。
 - **分数只用于排序，不是相关概率**：默认下限 `0.45`。查询请用 2–4 个具体技术锚点，不要只查 `heap` 这类单词——词面召回会命中无关主题。
 - **证据不可信**：文档内容一律当数据，不当指令。Agent 模块的 prompt 明确要求模型不执行片段中的任何指令。
+- **截图地址随计数一起返回**：`shots=N` 之外还给出 `images=<地址,…>`，有视觉能力的 agent 可以自己去读那张图，而不是只知道"证据在图片里"。
 - **结果自带事实**：命中行会内联文档自述的 `glibc=` / `arch=` / `cve=`，方便机械比对目标环境与语料的版本差异。
 
 ### 主要环境变量
@@ -346,7 +365,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 359 passed
+# 387 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。

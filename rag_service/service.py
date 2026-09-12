@@ -7,6 +7,7 @@ from uuid import uuid4
 from rag_service.backends.base import RetrievalBackend
 from rag_service.config import RagConfig
 from rag_service.models import RetrievalRequest, RetrievalResponse
+from rag_service.relevance import identifier_tokens
 
 
 class RagService:
@@ -111,14 +112,59 @@ class RagService:
                     "(software + version + mechanism), or lower score_threshold to inspect "
                     "near-misses."
                 )
-        elif self.config.low_score_warn > 0:
+        if results:
+            # A browse response is navigation, not a match, so grading it would
+            # report "no distinctive term" about a listing that never had a query.
+            response.confidence = self._confidence(request, results)
             top_score = results[0].score
-            if top_score is not None and top_score < self.config.low_score_warn:
+            low = (
+                top_score is not None
+                and self.config.low_score_warn > 0
+                and top_score < self.config.low_score_warn
+            )
+            if low:
                 response.warnings.append(
                     f"top result score is low ({top_score:.3f} < {self.config.low_score_warn:.2f}); "
                     "the query may be too vague, out of corpus, or matching only noise"
                 )
+            elif response.confidence == "semantic":
+                # Only reached once the hit has cleared the coarse filter: the
+                # interesting failure is a match that *looks* confident by score
+                # (the measured 0.49-0.55 band where off-corpus probes land) but
+                # shares no term with the query. Below the threshold the low-score
+                # warning is the honest message, and saying both would be noise.
+                response.warnings.append(
+                    "top result matched on meaning alone: it shares no distinctive term "
+                    "with the query. Confirm the topic against the cited source before "
+                    "relying on it, or retry with concrete anchors (software + version + "
+                    "mechanism)."
+                )
         return response
+
+    def _confidence(self, request: RetrievalRequest, results: List) -> str | None:
+        """Grade the top hit by the evidence behind it, not by its raw score.
+
+        Measured on the real corpus: the top-1/top-2 margin does *not* indicate
+        confidence here (a correct hit scored a 0.0011 margin because several
+        distinct documents cover the topic, while off-corpus queries sat at
+        0.004-0.006). What does discriminate is whether the query and the winning
+        document share actual terms -- and, most precisely, whether an identifier
+        the caller supplied (CVE, version, port) appears in that document.
+        """
+        if not results or not request.query.strip():
+            return None
+        top = results[0]
+        content = (top.content or "").lower()
+        identifiers = identifier_tokens(request.query)
+        if identifiers and any(token.lower() in content for token in identifiers):
+            return "anchored"
+        lexical = (top.metadata or {}).get("lexical_score")
+        if not isinstance(lexical, (int, float)):
+            # No lexical component was computed (dense-only mode, or a backend
+            # that does not emit one). Absence of the signal is not evidence the
+            # match was semantic, so decline to grade rather than guess.
+            return None
+        return "lexical" if lexical >= 0.5 else "semantic"
 
     def _lexical_weight_warning(self, request: RetrievalRequest) -> str | None:
         """Explain how a raised ``lexical_weight`` moves the score gate.

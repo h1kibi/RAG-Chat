@@ -151,6 +151,7 @@ def ctf_rag(
     lexical_weight: float | None = None,
     strip_images: bool | None = None,
     snippet_chars: int | None = None,
+    extract: str = "",
     cursor: str = "",
 ):
     """Search the local cybersecurity knowledge base and return cited evidence
@@ -177,6 +178,12 @@ def ctf_rag(
         chunks per page, ``cursor=source:<row>`` resumes, and ``snippet_chars=0``
         disables query-centered cropping but never disables the hard
         ``RAG_MAX_CONTENT_CHARS`` cap;
+      - extract="code" returns every fenced block in each hit as a labelled
+        segment (extract="payload" keeps only runnable ones: a shell/programming
+        language tag, or a command-shaped body). Use it to get the exploit or
+        command itself instead of a windowed excerpt you would have to reassemble;
+        content is not windowed in this mode. A document with no matching segment
+        says so rather than returning empty.
       - chunk_id set to a value copied from a previous result ("kb:row") ->
         exactly that chunk, so you can verify a citation before quoting it.
 
@@ -255,6 +262,7 @@ def ctf_rag(
             lexical_weight=lexical_weight,
             strip_images=strip_images,
             snippet_chars=snippet_chars,
+            extract=extract or None,
             cursor=cursor or None,
         )
     except Exception as exc:

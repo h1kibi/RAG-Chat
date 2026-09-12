@@ -460,3 +460,115 @@ def snippet_window(text: str, query: str, size: int) -> str:
     # cannot tell "this chunk is empty" from "the window collapsed", and would
     # read it as absent evidence. Fall back to a bounded, marked prefix.
     return text[: max(size, 32)].rstrip() + "…"
+
+
+# --- Evidence extraction -----------------------------------------------------
+#
+# A caller who wants the payload out of a writeup currently receives a
+# query-centred text window and has to re-find and re-assemble the code by hand.
+# These helpers hand back the discrete segments plus their provenance, so the
+# extraction happens once, in the layer that already has the document.
+
+_HTML_IMG_RE = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*[\"']([^\"']+)[\"'][^>]*>", re.IGNORECASE)
+_FENCE_RE = re.compile(
+    r"^[ \t]*(`{3,}|~{3,})[ \t]*([^\n`]*?)\r?\n(.*?)(?:^[ \t]*\1[ \t]*\r?$)",
+    re.M | re.S,
+)
+
+_PAYLOAD_LANGUAGES = frozenset(
+    {"python", "py", "bash", "sh", "shell", "zsh", "powershell", "ps1", "cmd",
+     "c", "cpp", "c++", "csharp", "java", "javascript", "js", "typescript", "ts",
+     "php", "ruby", "rb", "perl", "go", "rust", "sql", "lua", "asm", "nasm",
+     "http", "yaml", "yml", "json", "xml", "ini", "conf", "dockerfile", "makefile"}
+)
+"""Fence languages treated as executable/material rather than prose or output.
+
+An unlabelled fence is still returned (``kind="code"``): writeups routinely omit
+the language on the one block that matters, and dropping those would lose the
+exact segment the caller asked for. ``kind="payload"`` is the stricter view and
+requires a language that denotes runnable material or a payload-shaped body.
+"""
+
+_PAYLOAD_HINT_RE = re.compile(
+    r"(?im)^\s*(?:\$|#|>|PS[ >])|curl\s|wget\s|nc\s+-|ncat\s|python[23]?\s+-c|"
+    r"perl\s+-e|ruby\s+-e|import\s+\w+|from\s+\w+\s+import|"
+    r"(?:get|post|put|delete)\s+/[^\s]*\s+HTTP/|"
+    r"[\w./-]+\.(?:py|sh|rb|pl|go|c|cpp|java|php)\b"
+)
+
+
+_IMAGE_LINK_RE = re.compile(
+    r"!\[([^\]]*)\]\(\s*<?([^\s)>\x22\x27]*)>?(?:\s+[\x22\x27][^\x22\x27]*[\x22\x27])?\s*\)"
+)
+_UNSAFE_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.\-]*:", re.IGNORECASE)
+
+
+def _safe_image_target(src: str) -> str | None:
+    """Return the address if it is fetchable, else ``None``.
+
+    Only http(s) and relative paths qualify. A corpus document is untrusted
+    input, so a `javascript:` or `data:` "image address" must not be handed to a
+    caller that might act on it -- and returning it in a field named `image_refs`
+    invites exactly that. The previous parse also produced garbage for malformed
+    markdown, which is worse than nothing because it looks like a real path.
+    """
+    src = (src or "").strip()
+    if not src or any(ch in src for ch in " \t\r\n\"'<>"):
+        return None
+    if _UNSAFE_SCHEME_RE.match(src):
+        return src if src[:7].lower() == "http://" or src[:8].lower() == "https://" else None
+    return src
+
+
+def image_references(text: str) -> list[dict[str, str]]:
+    """Return the images a chunk embeds, so a caller can fetch them itself.
+
+    ``strip_images`` replaces the syntax with its alt text, which is right for a
+    text-only model but destroys the address. A multimodal caller can act on the
+    screenshot; it just needs the URL, which is why ``shots=N`` alone is not
+    enough.
+    """
+    if not text:
+        return []
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for match in _IMAGE_LINK_RE.finditer(text):
+        src = _safe_image_target(match.group(2))
+        if not src or src in seen:
+            continue
+        seen.add(src)
+        found.append({"src": src, "alt": match.group(1).strip()})
+    for match in _HTML_IMG_RE.finditer(text):
+        src = _safe_image_target(match.group(1))
+        if src and src not in seen:
+            seen.add(src)
+            found.append({"src": src, "alt": ""})
+    return found
+
+
+def extract_segments(text: str, kind: str = "code", max_segments: int = 8) -> list[dict[str, Any]]:
+    """Pull fenced segments out of a chunk, labelled with their language.
+
+    ``kind="code"`` returns every fenced block. ``kind="payload"`` keeps only
+    blocks that look runnable -- a language naming a programming or shell
+    language, or a body shaped like a command/exploit. Both are ordered by
+    position in the document.
+    """
+    if not text or kind not in {"code", "payload"}:
+        return []
+    out: list[dict[str, Any]] = []
+    for match in _FENCE_RE.finditer(text):
+        body = match.group(3)
+        if body is None:
+            continue
+        body = body.rstrip("\r\n")
+        if not body.strip():
+            continue
+        language = (match.group(2) or "").strip().split()[0].lower() if match.group(2) else ""
+        if kind == "payload":
+            if not (language in _PAYLOAD_LANGUAGES or _PAYLOAD_HINT_RE.search(body)):
+                continue
+        out.append({"language": language or None, "text": body})
+        if len(out) >= max_segments:
+            break
+    return out
