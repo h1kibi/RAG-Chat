@@ -14,9 +14,10 @@
 │                       MCP 工具 / HTTP API / CLI / LangChain / OpenAI schema
 ├── agent_service/      Agent 模块 —— 本地 Web 对话
 │                       离线 Ollama，或填 API Key 走云端
-├── knowledge-base/     知识库模板（Git 内）
+├── knowledge-base/     知识库模板（Git 内，8 篇示例文档）
+├── examples/demo-kb/   演示索引（147 KB），开箱即可查询
 ├── scripts/            建库与导入脚本
-└── tests/              330 个测试
+└── tests/              334 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -63,6 +64,24 @@ $env:RAG_KB_ROOT = 'C:\RAG-Agent-Data\data\knowledge_base'
 这一步把上游索引转成 memmap + int8 形式（原文件不动）。**每次重建索引后都要重跑**，否则服务会报索引过期。
 
 > 构建索引本身由 `LangGraph-Chatchat` 等上游工具完成，本项目只负责转换、检索和服务。`build_cosine` 需要反序列化上游写的 `index.pkl`，因此要装 `.[index]`（即 `langchain-community`）；只查询已有索引则不需要。
+
+**本仓库不含索引。** 已装好的 `C:\RAG-Agent-Data` 属于运行数据，不进 Git；克隆下来的仓库里只有 `knowledge-base/` 模板（8 篇手写示例文档），没有 `vector_store/`。要先用一会儿再准备自己的语料，可以直接用随仓库附带的演示索引：
+
+```powershell
+$env:RAG_KB_ROOT = 'examples\demo-kb'
+$env:RAG_ALLOWED_KNOWLEDGE_BASES = 'cybersec'
+$env:RAG_DEFAULT_SCORE_THRESHOLD = '0.35'   # 见下方说明
+.\.venv\Scripts\python.exe -m rag_service search "授权渗透测试开始前要确认什么" --top-k 2
+```
+
+`examples/demo-kb`（147 KB，11 行）由上面 8 篇模板文档生成，用来验证安装是否完整。它由 `scripts/build-demo-index.py` 生成，用真实语料时不要照搬：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/build-demo-index.py
+.\.venv\Scripts\python.exe -m rag_service.build_cosine --kb-root examples\demo-kb --knowledge-base cybersec
+```
+
+> **演示索引要把 `RAG_DEFAULT_SCORE_THRESHOLD` 降到 `0.35`。** 默认 `0.45` 是按百万行语料标定的：小语料里几乎每个词都"稀有"，词法项贡献接近 0，融合分基本等于 `0.65 × 余弦`，于是 11 行里 6 条正常提问会掉到 0.45 以下而返回 `no_match`。降到 0.35 后 6/6 命中正确文档，域外提问（如"今天晚饭吃什么"）仍然返回空。阈值是**按语料标定**的，换语料就该重跑 `rag_service.evaluate` / `scripts/rag_threshold_band.py`。
 
 ### 3. 起 Agent
 
@@ -317,7 +336,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 330 passed
+# 334 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。
@@ -337,7 +356,8 @@ $env:ZAI_API_KEY = '...'
 ## 已知限制
 
 - **Python 3.12 only**，Windows 为主；`faiss-cpu==1.9.0` 没有 3.13 轮子。
-- **索引构建不在本仓库**：需要上游 `LangGraph-Chatchat` 之类的工具产出 `index.faiss` + `index.pkl`，本项目负责转换与检索。
+- **索引构建不在本仓库**：需要上游 `LangGraph-Chatchat` 之类的工具产出 `index.faiss` + `index.pkl`，本项目负责转换与检索。仓库内只有 `examples/demo-kb`（147 KB，由 8 篇模板文档生成）用于验证安装；真实语料必须自己构建，`scripts/build-demo-index.py` 的简单切块规则**不适合**大语料。
+- **检索质量取决于语料**：`score_threshold` 默认 0.45 是按百万行语料标定的。换语料必须重新标定（`rag_service.evaluate` / `scripts/rag_threshold_band.py`），小语料往往需要更低门限。
 - **单用户、单机**：没有权限体系、没有并发调度，不是服务端方案。
 - **扫描版 PDF 未处理**：需要单独的 OCR 流程。
 - **Agent 模块只做 Web 问答**：没有工具调用、没有多步 Agent 图、没有在线搜索。这是刻意的——断网环境下这些能力价值有限。

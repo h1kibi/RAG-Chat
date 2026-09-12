@@ -1,0 +1,1 @@
+{"artifacts": {"docs_bytes": 10083, "int8_bytes": 11264, "offsets_bytes": 88, "scales_bytes": 44, "vectors_bytes": 45056}, "dimension": 1024, "format": "cosine-v2", "quantization": "int8", "rows": 11, "source": {"index.faiss": {"mtime_ns": 1789247023703790900, "size": 45101}, "index.pkl": {"mtime_ns": 1789247023704786000, "size": 10275}}, "sq8_bytes": 19537}

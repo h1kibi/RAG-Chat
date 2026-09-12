@@ -4,6 +4,28 @@
 
 ## [Unreleased]
 
+### Added — 演示索引（让克隆后 RAG 立即可用）
+
+之前克隆下来的仓库**无法直接做检索**：`rag_service` 只读，`build_cosine` 只转换，两者都需要
+上游工具产出的 `index.faiss` + `index.pkl`，而仓库里没有索引。第一次实测确认了这一点
+（全新克隆 + 模板，`search` 退出码 3），也就是「git clone → 安装 → MCP 可用」的最后一环
+是断的，新用户只能看到 `RAG 不可用`。
+
+- 新增 `examples/demo-kb`：由 `knowledge-base/cybersec` 的 8 篇模板文档生成的小索引
+  （11 行 × 1024 维，147 KB）。`RAG_KB_ROOT=examples/demo-kb` 后 CLI / MCP / HTTP / Agent
+  立即可查，无需任何外部工具。
+- 新增 `scripts/build-demo-index.py` 生成它，使这份随仓库发布的二进制产物**可复现**，
+  而不是一个没人知道怎么重建的黑盒。
+- 新增 `tests/test_demo_index.py`：校验产物完整、manifest 未过期、可浏览、且索引覆盖
+  全部模板文档。用例不依赖 Ollama（走 browse 模式），并已验证产物损坏或缺失时确实失败。
+
+演示语料暴露了一个真实标定问题并写进文档：**`score_threshold` 是按语料标定的**。默认 0.45
+面向百万行语料；11 行的小语料里几乎每个词都"稀有"，词法项贡献趋近 0，融合分≈`0.65 × 余弦`，
+于是 6 条正常提问里 3 条掉到 0.45 以下返回 `no_match`——而 top-1 其实都是正确文档。降到 0.35
+后 6/6 命中，域外提问仍返回空。演示用法据此在 README 中显式给出。
+
+测试从 330 增至 334。
+
 ### Fixed — 第八轮质检（文档化入口点执行、测量数据复核）
 
 本轮把「文档里写了、但从没被执行过」的路径全部跑了一遍，两个文档化入口点有问题：
@@ -146,7 +168,7 @@ base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以�
 测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
 补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
 
-八轮累计：280 → 330 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
+九轮累计：280 → 334 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
 
 ### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
 
