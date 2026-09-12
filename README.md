@@ -252,10 +252,16 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\scripts\init-cybersec-kb.ps1 -DataRoot C:\RAG-Agent-Data
-.\scripts\rebuild-knowledge-base.ps1 -KnowledgeBase cybersec -EmbeddingModel bge-m3
 ```
 
-`rebuild-knowledge-base.ps1` 在重建索引成功后会**自动**刷新 `build_cosine` 产物。
+索引构建由上游工具完成，不在本仓库内，所以要显式告诉脚本去哪里找它（或用 `$env:CHATCHAT_SERVER_ROOT` 环境变量）：
+
+```powershell
+.\scripts\rebuild-knowledge-base.ps1 -KnowledgeBase cybersec -EmbeddingModel bge-m3 `
+    -ServerRoot C:\path\to\LangGraph-Chatchat\chatchat-server
+```
+
+没有 `-ServerRoot` 时脚本会明确报错，而不是静默失败。重建索引成功后会**自动**刷新 `build_cosine` 产物（`cybersec` 的便捷包装是同目录的 `rebuild-cybersec.ps1`，参数相同）。
 
 `scripts/import-mydb.ps1`、`import-security-sources.ps1`、`import-des-ctf-knowledge.ps1`、`import_des_ctf_knowledge.py` 用于把外部资料导入独立知识库；导入前会做脱敏与噪声过滤，并保留来源清单。规则见脚本头部注释。
 
@@ -265,7 +271,7 @@ $env:ZAI_API_KEY = '...'
 .\.venv\Scripts\python.exe -m rag_service.evaluate --help
 ```
 
-用 `tests/data/retrieval_queries.jsonl`（标注了 `expected_sources`）测 top-1 / MRR，并对比不同 `lexical_weight` 与阈值。调阈值前先跑 `scripts/rag_threshold_band.py` 看分数分布，别凭感觉调。
+用 `tests/data/retrieval_queries.jsonl` 测 top-1 / MRR，并对比不同 `lexical_weight` 与阈值。每条记录用 `query` + `prefixes`（source 路径前缀）/ `sources`（精确路径）标注正确答案，可选 `label`（`positive` / `negative` / `mismatch`，默认 `positive`）。调阈值前先跑 `scripts/rag_threshold_band.py` 看分数分布，别凭感觉调。
 
 ---
 

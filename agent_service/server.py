@@ -32,27 +32,47 @@ def _sse(event: Dict[str, Any]) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
+_rag_status_cache: Optional[Dict[str, Any]] = None
+_rag_status_lock = asyncio.Lock()
+
+
 async def _rag_status(config: AgentConfig) -> Dict[str, Any]:
-    """Report whether the local index is usable, without failing the status page."""
+    """Report whether the local index is usable, without failing the status page.
+
+    Constructing the backend opens the converted index, which is a ~1 GB read
+    for a large corpus, and the UI re-polls status on every load. The answer is
+    a startup capability, not a live metric (the service holds a memmap of the
+    artifacts it opened, so a rebuild requires a restart anyway), so a
+    successful result is memoized. Failures are re-checked on every call: the
+    index may simply not have been built yet.
+    """
+    global _rag_status_cache
     if not config.rag_enabled:
         return {"enabled": False}
+    if _rag_status_cache is not None:
+        return _rag_status_cache
 
-    def _inspect() -> Dict[str, Any]:
-        from rag_service import RagConfig
-        from rag_service.backends.faiss import FaissBackend, describe_status
+    async with _rag_status_lock:
+        if _rag_status_cache is not None:
+            return _rag_status_cache
 
-        rag_config = RagConfig.from_environment()
-        backend = FaissBackend(rag_config)
-        return {
-            "enabled": True,
-            "knowledge_base": config.rag_knowledge_base or rag_config.default_knowledge_base,
-            "status": describe_status(backend.status()),
-        }
+        def _inspect() -> Dict[str, Any]:
+            from rag_service import RagConfig
+            from rag_service.backends.faiss import FaissBackend, describe_status
 
-    try:
-        return await asyncio.to_thread(_inspect)
-    except Exception as exc:  # noqa: BLE001 - status must degrade, not raise
-        return {"enabled": True, "error": f"{type(exc).__name__}: {exc}"}
+            rag_config = RagConfig.from_environment()
+            backend = FaissBackend(rag_config)
+            return {
+                "enabled": True,
+                "knowledge_base": config.rag_knowledge_base or rag_config.default_knowledge_base,
+                "status": describe_status(backend.status()),
+            }
+
+        try:
+            _rag_status_cache = await asyncio.to_thread(_inspect)
+        except Exception as exc:  # noqa: BLE001 - status must degrade, not raise
+            return {"enabled": True, "error": f"{type(exc).__name__}: {exc}"}
+        return _rag_status_cache
 
 
 def create_app(config: AgentConfig) -> FastAPI:

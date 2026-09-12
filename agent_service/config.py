@@ -34,9 +34,17 @@ GROUNDED_SYSTEM_PROMPT = (
 
 def _env_flag(name: str, default: bool) -> bool:
     raw = os.getenv(name)
-    if raw is None:
+    if raw is None or not raw.strip():
+        # An unset OR blank variable means "not configured", not "false":
+        # `AGENT_RAG_ENABLED=` in a shell profile must not silently disable
+        # retrieval.
         return default
-    return raw.strip().lower() not in {"0", "false", "no", "off", ""}
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean (1/0/true/false/yes/no/on/off), got {raw!r}")
 
 
 def _env_list(name: str) -> tuple[str, ...]:
@@ -45,12 +53,24 @@ def _env_list(name: str) -> tuple[str, ...]:
 
 def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name)
-    return default if raw is None or not raw.strip() else float(raw)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        # Parse failures must name the variable; the bare float() message
+        # ("could not convert string to float") leaves the operator guessing.
+        raise ValueError(f"{name} must be a number, got {raw!r}") from exc
 
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
-    return default if raw is None or not raw.strip() else int(raw)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
 
 
 @dataclass(frozen=True)

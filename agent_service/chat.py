@@ -66,12 +66,38 @@ def trim_history(messages: Sequence[ChatMessage], history_len: int) -> List[Chat
 
 
 def format_evidence(response: Dict[str, Any], limit_chars: int) -> str:
-    """Render retrieval results as numbered, citable blocks for the prompt."""
+    """Render retrieval results as numbered, citable blocks for the prompt.
+
+    Mirrors the notices the retrieval service attaches for its own tool text,
+    for the two cases that change how the numbers must be read:
+
+    - ``degraded`` means ranking fell back to lexical evidence, so the score
+      column is a lexical value, not a cosine similarity.
+    - ``no_match`` means the search ran and found nothing. Saying so lets the
+      model answer "the knowledge base has no basis for this" instead of
+      silently falling back to its own knowledge, which would be presented as
+      if it came from the corpus.
+    """
     from rag_service.models import _format_facts
 
     results = response.get("results") or []
-    if not results or limit_chars <= 0:
+    if not results:
+        if response.get("no_match") or response.get("degraded") or response.get("warnings"):
+            reason = "检索已执行，未命中任何片段。" if response.get("no_match") else "检索未返回片段。"
+            if response.get("degraded"):
+                reason += f"（DEGRADED {response['degraded']}：embedding 不可用，已降级为词法检索，"
+                reason += "此处的“未命中”不能作为“语料中没有”的结论。）"
+            return reason
         return ""
+    if limit_chars <= 0:
+        return ""
+    notices: List[str] = []
+    if response.get("degraded"):
+        notices.append(
+            f"DEGRADED ({response['degraded']})：embedding 提供方不可用，结果仅按词法证据排序，"
+            "因此下面的 score 是 [0,1] 的词法值，不是余弦相似度；召回范围比平时窄，"
+            "“没有命中”不足以说明语料中没有。"
+        )
     blocks: List[str] = []
     used = 0
     for index, result in enumerate(results, start=1):
@@ -94,7 +120,7 @@ def format_evidence(response: Dict[str, Any], limit_chars: int) -> str:
         used += len(block)
     if not blocks:
         return ""
-    return "\n\n".join(blocks)
+    return "\n\n".join(notices + blocks)
 
 
 def build_messages(

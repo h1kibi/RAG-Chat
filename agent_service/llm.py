@@ -179,8 +179,13 @@ def _read_non_streaming(provider: LlmProvider, response: httpx.Response, model: 
 async def probe(provider: LlmProvider, *, timeout: float = 5.0) -> tuple[bool, str]:
     """Reachability check for one provider, used by ``/api/health``.
 
-    Returns a ``(ok, detail)`` pair instead of raising so a status page can
+    Returns an ``(ok, detail)`` pair instead of raising so a status page can
     report every provider at once, including the ones that are down.
+
+    ``GET /models`` is the cheap check, but not every OpenAI-compatible gateway
+    implements it. Reporting such an endpoint as down would be wrong -- chat
+    works -- so a 404/405 falls back to one minimal completion, which is
+    definitive.
     """
     if not provider.offline and not provider.api_key:
         return False, "未配置 API Key"
@@ -190,6 +195,41 @@ async def probe(provider: LlmProvider, *, timeout: float = 5.0) -> tuple[bool, s
             response = await client.get(url, headers=_headers(provider))
     except httpx.HTTPError as exc:
         return False, f"{type(exc).__name__}: {exc}"
-    if response.status_code >= 400:
-        return False, f"HTTP {response.status_code}"
-    return True, "ok"
+    if response.status_code in (401, 403):
+        return False, f"HTTP {response.status_code}（API Key 被拒绝）"
+    if response.status_code < 400:
+        return True, "ok"
+    if response.status_code in (404, 405):
+        return await _probe_via_chat(provider, timeout=timeout)
+    return False, f"HTTP {response.status_code}"
+
+
+async def _probe_via_chat(provider: LlmProvider, *, timeout: float) -> tuple[bool, str]:
+    """Confirm the endpoint can actually answer a one-token completion.
+
+    Used when ``/models`` is unavailable. Costs a negligible request and only
+    runs for providers whose model listing is unsupported.
+    """
+    payload = {
+        "model": provider.models[0] if provider.models else "unknown",
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                provider.chat_url, json=payload, headers=_headers(provider)
+            )
+    except httpx.HTTPError as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    if response.status_code in (401, 403):
+        return False, f"HTTP {response.status_code}（API Key 被拒绝）"
+    if response.status_code < 400:
+        return True, "ok（端点不提供 /models，已用最小请求确认）"
+    if response.status_code == 404:
+        return False, (
+            f"HTTP 404（{provider.chat_url} 不存在：检查 base_url 是否缺少路径段，"
+            f"如 /v1 或 /v4）"
+        )
+    return False, f"HTTP {response.status_code}（最小请求被拒绝）"

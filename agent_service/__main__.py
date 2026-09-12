@@ -31,6 +31,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 async def _run_check(config: AgentConfig) -> int:
+    """Report readiness and return an exit code a script can gate on.
+
+    0 = everything ready; 1 = chat works but retrieval does not (degraded);
+    2 = no model reachable (the agent cannot answer at all).
+    """
     from agent_service.llm import probe
     from agent_service.server import _rag_status
 
@@ -46,14 +51,23 @@ async def _run_check(config: AgentConfig) -> int:
     rag = await _rag_status(config)
     if not rag.get("enabled", True):
         print("[SKIP] RAG 未启用（AGENT_RAG_ENABLED=0）")
+        rag_ok = True
     elif rag.get("error"):
         print(f"[FAIL] RAG 不可用：{rag['error']}")
+        rag_ok = False
     else:
         print(f"[OK  ] RAG 知识库 {rag.get('knowledge_base')}: {rag.get('status')}")
+        rag_ok = True
 
     if healthy == 0:
-        print("\n没有可用模型。离线环境请先启动 Ollama：ollama serve", file=sys.stderr)
+        print(
+            "\n没有可用模型，无法回答。离线环境请先启动 Ollama：ollama serve",
+            file=sys.stderr,
+        )
         return 2
+    if not rag_ok:
+        print("\n模型可用，但检索不可用：问答会降级为纯对话。", file=sys.stderr)
+        return 1
     return 0
 
 

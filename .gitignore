@@ -1,6 +1,6 @@
 # Runtime and data roots (never commit local corpora or indexes)
 C:/RAG-Agent-Data/
-data/
+/data/
 sources/
 
 # Vendored upstream used only to build the index; see README "构建索引"

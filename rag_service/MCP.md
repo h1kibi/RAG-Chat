@@ -29,7 +29,7 @@ ctf_rag
 项目当前固定的关键版本：
 
 - Python `>=3.12,<3.13`
-- `mcp==1.12.0`
+- `mcp==1.12.4`
 - `pydantic==2.9.2`
 - `faiss-cpu==1.9.0`
 - Ollama embedding model：`bge-m3`
@@ -393,5 +393,5 @@ cd <repo>
 当前验收基线：
 
 ```text
-271 tests OK
+280 tests OK
 ```

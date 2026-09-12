@@ -215,6 +215,12 @@ async function send() {
           window.scrollTo(0, document.body.scrollHeight);
         } else if (event.type === "retrieval") {
           if (event.results && event.results.length) showEvidence(wrap, event);
+          // `degraded` changes what the score column means, so it is shown as a
+          // notice rather than left implicit in the numbers.
+          if (event.degraded) {
+            note(wrap, `检索降级（${event.degraded}）：embedding 不可用，结果仅按词法排序，` +
+              "分数不是语义相似度；召回范围变窄。");
+          }
           (event.warnings || []).forEach((warning) => note(wrap, warning));
         } else if (event.type === "warning") {
           note(wrap, event.message);
