@@ -17,7 +17,7 @@
 ├── knowledge-base/     知识库模板（Git 内，8 篇示例文档）
 ├── examples/demo-kb/   演示索引（93 KB），开箱即可查询
 ├── scripts/            建库与导入脚本
-└── tests/              335 个测试
+└── tests/              336 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -337,7 +337,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 335 passed
+# 336 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。
@@ -358,6 +358,7 @@ $env:ZAI_API_KEY = '...'
 
 - **Python 3.12 only**，Windows 为主；`faiss-cpu==1.9.0` 没有 3.13 轮子。
 - **索引构建不在本仓库**：需要上游 `LangGraph-Chatchat` 之类的工具产出 `index.faiss` + `index.pkl`，本项目负责转换与检索。仓库内只有 `examples/demo-kb`（93 KB，由 8 篇模板文档生成、以 `--prebuilt` 发布）用于验证安装；真实语料必须自己构建，`scripts/build-demo-index.py` 的简单切块规则**不适合**大语料。
+- **sidecar 指纹含 mtime**：`postings` / `ranges` 侧车用 docs 文件的 `size+mtime_ns` 做指纹，因此**拷贝或克隆一个知识库后这些侧车一定失效**。`ranges` 会静默回退到流式重建（大语料约 20s，结果正确）；`postings` 会让启动行显示 `postings=unusable`（标识符召回暂时关闭），重跑 `build_cosine` 即恢复。演示索引不受影响（11 行且无含数字 token）。
 - **检索质量取决于语料**：`score_threshold` 默认 0.45 是按百万行语料标定的。换语料必须重新标定（`rag_service.evaluate` / `scripts/rag_threshold_band.py`），小语料往往需要更低门限。
 - **单用户、单机**：没有权限体系、没有并发调度，不是服务端方案。
 - **扫描版 PDF 未处理**：需要单独的 OCR 流程。

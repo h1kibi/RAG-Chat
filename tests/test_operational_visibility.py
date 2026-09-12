@@ -110,6 +110,33 @@ class CapabilityReportingTests(unittest.TestCase):
         unknown = describe_status({})
         self.assertIn("dense_path=unknown", unknown)
 
+    def test_a_present_but_unusable_postings_sidecar_is_not_called_missing(self):
+        # The sidecar fingerprints the document file by size+mtime, so copying a
+        # knowledge base always invalidates it. Reporting that as "missing"
+        # sends the operator looking for a file that is right there.
+        from rag_service.backends.faiss import _postings_state, describe_status
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docs = Path(temp_dir) / "docs.cos.jsonl"
+            docs.write_text("{}\n", encoding="utf-8")
+            self.assertEqual(_postings_state(docs), "missing")
+
+            (docs.parent / "docs.cos.postings").write_bytes(b"")
+            (docs.parent / "docs.cos.postings.idx.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(_postings_state(docs), "unusable")
+
+        rendered = describe_status(
+            {
+                "dense_path": "sq8",
+                "rows": 10,
+                "postings": False,
+                "postings_state": "unusable",
+                "faiss_available": True,
+            }
+        )
+        self.assertIn("postings=unusable", rendered)
+        self.assertNotIn("postings=missing", rendered)
+
     def test_status_reports_numpy_when_sq8_is_missing(self):
         # The degradation must be visible rather than inferred from latency.
         with tempfile.TemporaryDirectory() as temp_dir:

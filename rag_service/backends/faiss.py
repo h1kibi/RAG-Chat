@@ -138,6 +138,23 @@ def describe_dense_path(store: Dict[str, Any]) -> str | None:
     )
 
 
+def _postings_state(docs_path: Path) -> str:
+    """Why identifier recall is unavailable: ``absent`` or ``unusable``.
+
+    The distinction matters because the file can exist and still be rejected:
+    the sidecar records a ``size+mtime_ns`` fingerprint of the document file, so
+    copying a knowledge base (or cloning a repository that ships one) always
+    invalidates it, and the reader then reports postings as missing although
+    nothing is missing. Same remedy either way, but "missing" sends the operator
+    looking for a file that is right there.
+    """
+    postings_path = docs_path.with_name("docs.cos.postings")
+    index_file = docs_path.with_name("docs.cos.postings.idx.json")
+    if not postings_path.is_file() or not index_file.is_file():
+        return "missing"
+    return "unusable"
+
+
 def describe_status(status: Dict[str, Any]) -> str:
     """Render a :meth:`FaissBackend.status` result for startup logging.
 
@@ -150,7 +167,11 @@ def describe_status(status: Dict[str, Any]) -> str:
     where = f" rows={rows}" if isinstance(rows, int) else ""
     extra = ""
     if not status.get("postings", True):
-        extra = " postings=missing (identifier recall disabled; rebuild build_cosine)"
+        state = str(status.get("postings_state") or "missing")
+        extra = (
+            f" postings={state} (identifier recall disabled; "
+            "`python -m rag_service.build_cosine` regenerates the sidecar)"
+        )
     return (
         f"dense_path={path}{where}: "
         f"{_path_detail(path, status.get('sq8_state'))}{extra}"
@@ -962,7 +983,10 @@ class FaissBackend(RetrievalBackend):
             store = self._load_store(name, self._resolve_embedding_model(name))
             status["dense_path"] = dense_path(store)
             status["rows"] = int(store["vectors"].shape[0])
-            status["postings"] = _open_postings(store["docs_path"]) is not None
+            postings = _open_postings(store["docs_path"])
+            status["postings"] = postings is not None
+            if postings is None:
+                status["postings_state"] = _postings_state(store["docs_path"])
             # Why the numpy scan is in use: an absent artifact and an unreadable
             # one need different remedies, and build_cosine only fixes the first.
             status["sq8_state"] = _sq8_state(store)

@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### Fixed — 第二次真克隆验证暴露的问题
+
+`.gitattributes`（换行符）与 postings 诊断：
+
+- **Git 改写了产物文件的换行符**。`core.autocrlf=true`（Git for Windows 的默认值）把
+  `docs.cos.jsonl` 检出成 CRLF：10094 字节而非 10083（每行多 1 字节），而**二进制的
+  `docs.cos.offsets.u64` 不被转换**。结果是每行的偏移都短 1 字节，读取报
+  `Expecting value: line 1 column 1 (char 0)`，查询返回空。上一版只在工作树里测过，
+  而 Linux/macOS 的检出路径不受影响，所以没暴露。修法是 `.gitattributes` 把这些扩展名标为
+  `-text`，逐字节存取。已在真实 `git clone` 上验证：克隆后 `docs.cos.jsonl` = 10083 字节、
+  无 CRLF，查询返回 `chunk_id=cybersec:7`。
+- **`postings` 把「文件在但指纹失效」报成 `missing`**。postings/ranges 侧车用 docs 文件的
+  `size+mtime_ns` 做指纹，所以**拷贝或克隆知识库后一定失效**。原来的话术让人去找一个就在
+  原地的文件。现在区分 `missing`（确实没有）与 `unusable`（存在但指纹过期），并说明
+  `build_cosine` 会重新生成侧车。`ranges` 的行为不变（静默回退重建）。
+
+测试 335 → 336。
+
 ### Fixed — 演示索引在真实克隆上不可用（第九轮续）
 
 上一版把演示索引连同 `index.faiss` / `index.pkl` 一起提交，从 GitHub 克隆后**它自己就是坏的**：
