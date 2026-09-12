@@ -16,7 +16,7 @@
 │                       离线 Ollama，或填 API Key 走云端
 ├── knowledge-base/     知识库模板（Git 内）
 ├── scripts/            建库与导入脚本
-└── tests/              278 个测试
+└── tests/              280 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -273,7 +273,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 278 passed
+# 280 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。
