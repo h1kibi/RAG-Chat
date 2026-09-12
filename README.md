@@ -16,7 +16,7 @@
 │                       离线 Ollama，或填 API Key 走云端
 ├── knowledge-base/     知识库模板（Git 内）
 ├── scripts/            建库与导入脚本
-└── tests/              324 个测试
+└── tests/              325 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -216,7 +216,7 @@ from rag_service.adapters import create_openai_tool_schema, dispatch_openai_tool
 | provider | 何时可用 | 说明 |
 |---|---|---|
 | `ollama` | 永远（离线主路径） | 本地 Ollama，默认 `qwen2.5:7b` |
-| `cloud` | 配了 endpoint + API Key | 任意 OpenAI 兼容端点 |
+| `cloud` | 配了 endpoint + 模型列表 | 任意 OpenAI 兼容端点；未配 Key 时会出现但明确报错，不会静默失败 |
 
 云端 provider **只在显式配置后才出现**，默认配置里根本没有它——断网时不会因为找不到 Key 而失败。API Key 只从环境变量读，不落盘、不进日志、不回传给浏览器（`/api/config` 做了脱敏）。
 
@@ -317,7 +317,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 324 passed
+# 325 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。

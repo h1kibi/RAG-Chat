@@ -128,6 +128,24 @@ class Sq8FallbackDiagnosticTests(unittest.TestCase):
             _build_store(root)
             self.assertIn("dense_path=sq8", self._status(root))
 
+    def test_a_healthy_store_does_not_claim_the_artifact_is_unreadable(self):
+        # `sq8_state` answers "why did we fall back?", so it is only meaningful
+        # when a fallback happened. Published unconditionally it made
+        # /v1/rag/health report dense_path=sq8 and sq8_state=unreadable at the
+        # same time, which is a false alarm for anything reading the JSON.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _build_store(root)
+            backend_module._LOGGED_PATHS.clear()
+            backend = FaissBackend(_config(root))
+            try:
+                status = backend.status("cybersec")
+            finally:
+                backend.close()
+
+        self.assertEqual(status["dense_path"], "sq8")
+        self.assertEqual(status["sq8_state"], "loaded")
+
     def test_an_absent_artifact_points_at_build_cosine(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

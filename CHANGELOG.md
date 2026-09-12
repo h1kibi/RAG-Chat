@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### Fixed — 第七轮质检（健康字段自相矛盾）
+
+- **`/v1/rag/health` 在完全健康时报 `sq8_state=unreadable`**：`sq8_state` 回答的是
+  「为什么走了 numpy 回退」，但被无条件写进 capabilities，于是同一份 JSON 里同时出现
+  `dense_path=sq8` 与 `sq8_state=unreadable`。实测（真实 1,016,721 行索引）确实如此。
+  该端点文档写明「供监控探活」，所以这是一个机器可读的假告警：任何读 `sq8_state` 的探活、
+  看板或调用方都会把健康服务判成产物损坏。现在该字段在回退发生时报告 `missing` /
+  `unreadable`，正常走 sq8 时报告 `loaded`；两种回退原因的区分（以及「不可读不要报成缺失、
+  要指向 `--force`」）由既有用例继续守住。
+- 文档：云端 provider 的「何时可用」改为「配了 endpoint + 模型列表」，与代码一致
+  （Key 缺失时 provider 仍出现，但探测与对话都明确报错）。
+
+测试从 324 增至 325：新增健康字段一致性用例，回退到旧实现后确认失败。
+
 ### Fixed — 第六轮质检（CLI 配置诊断、脚本契约、环境变量文档）
 
 - **Agent CLI 把配置错误抛成回溯**：`AGENT_PORT=not-a-port` 运行
@@ -93,7 +107,7 @@ base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以�
 测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
 补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
 
-六轮累计：280 → 324 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
+七轮累计：280 → 325 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
 
 ### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
 

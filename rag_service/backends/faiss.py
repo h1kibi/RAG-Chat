@@ -67,16 +67,24 @@ def dense_path(store: Dict[str, Any]) -> str:
 
 
 def _sq8_state(store: Dict[str, Any] | None) -> str:
-    """Whether the sq8 artifact a numpy fallback implies is absent or unusable.
+    """Why the scan fell back, or ``loaded`` when it did not.
 
     The distinction matters because the remedies differ: an absent artifact is
     fixed by build_cosine, while a present-but-unreadable one is not (build_cosine
     reports the artifacts as current and exits without touching it) — the usual
     cause is a corrupt file or a process that could not map it for lack of
     memory, which is exactly when the numpy fallback appears.
+
+    This is published in the health payload, so it must also be truthful on the
+    happy path: the question only has an answer when there was a fallback. The
+    earlier version returned ``unreadable`` for any file that simply existed,
+    which made a healthy service advertise ``dense_path=sq8`` and
+    ``sq8_state=unreadable`` at the same time.
     """
     if not store:
         return "unknown"
+    if store.get("sq8") is not None:
+        return "loaded"
     docs_path = store.get("docs_path")
     if docs_path is None:
         return "unknown"
