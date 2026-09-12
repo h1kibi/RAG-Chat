@@ -493,6 +493,54 @@ class ImageAvailabilityTests(unittest.TestCase):
         self.assertEqual(refs[0]["available"], "local")
         self.assertTrue(refs[0]["path"].endswith("a.png"))
 
+    def test_an_empty_or_missing_address_is_dropped_not_placeholder(self):
+        # Reporting a placeholder would invite the caller to try opening it.
+        from rag_service.backends.faiss import _image_availability
+
+        self.assertEqual(_image_availability([{"src": ""}, {"alt": "x"}, {"src": None}], None), [])
+
+    def test_a_reference_cannot_escape_the_content_tree(self):
+        # A document is untrusted input; `../../..` must not make the service
+        # advertise a readable file outside the corpus.
+        import tempfile
+        from pathlib import Path as _Path
+
+        from rag_service.backends.faiss import _image_availability
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = _Path(temp_dir)
+            content = base / "cybersec" / "content"
+            doc_dir = content / "13_xianzhi"
+            doc_dir.mkdir(parents=True)
+            doc = doc_dir / "a.md"
+            doc.write_text("x")
+            (base / "secret.txt").write_text("s")
+            refs = _image_availability([{"src": "../../secret.txt"}], doc)
+
+        self.assertEqual(refs[0]["available"], "not-imported")
+        self.assertNotIn("path", refs[0])
+
+    def test_a_resolvable_reference_is_found_despite_a_short_path_alias(self):
+        # Comparing a resolved path against an unresolved one silently failed on
+        # Windows whenever the tree was reached through a short name
+        # (`ADMINI~1` vs `Administrator`), marking every real image as absent.
+        import tempfile
+        from pathlib import Path as _Path
+
+        from rag_service.backends.faiss import _image_availability
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            content = _Path(temp_dir) / "cybersec" / "content"
+            doc_dir = content / "13_xianzhi"
+            (doc_dir / "images").mkdir(parents=True)
+            (doc_dir / "images" / "ok.png").write_bytes(b"x")
+            doc = doc_dir / "a.md"
+            doc.write_text("x")
+            refs = _image_availability([{"src": "images/ok.png"}], doc)
+
+        self.assertEqual(refs[0]["available"], "local")
+        self.assertTrue(refs[0]["path"].endswith("ok.png"))
+
     def test_the_signal_line_says_the_image_is_not_in_the_corpus(self):
         result = SearchResult(
             content="step", score=0.8, source="a/b.md", chunk_id="c:1",

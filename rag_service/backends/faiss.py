@@ -200,14 +200,32 @@ def _image_availability(
     """
     if not images:
         return images
+    # Resolve once, on both sides of the containment check: comparing a resolved
+    # path against an unresolved one fails whenever the tree is reached through a
+    # Windows short name (`C:\Users\ADMINI~1\...` vs `...\Administrator\...`),
+    # which silently marked every legitimate image as absent.
+    if document_path is not None:
+        document_path = document_path.resolve()
+    content_root = _content_root(document_path)
     out = []
     for item in images:
-        src = str(item.get("src") or "")
-        entry = dict(item)
+        src = str(item.get("src") or "").strip()
+        if not src:
+            # A malformed reference carries no address; reporting a placeholder
+            # would invite the caller to try opening it.
+            continue
+        entry = {**item, "src": src}
         if src.startswith(("http://", "https://")):
             entry["available"] = "remote"
         else:
-            candidate = (document_path.parent / src).resolve() if document_path else None
+            candidate = None
+            if document_path is not None:
+                candidate = (document_path.parent / src).resolve()
+                # A document is untrusted input: `../../..` in an image reference
+                # must not make the service advertise a readable file outside the
+                # corpus. Confine resolution to the content tree.
+                if content_root is not None and not _within(candidate, content_root):
+                    candidate = None
             if candidate is not None and candidate.is_file():
                 entry["available"] = "local"
                 entry["path"] = str(candidate)
@@ -216,6 +234,24 @@ def _image_availability(
                 entry["available"] = "not-imported"
         out.append(entry)
     return out
+
+
+def _content_root(document_path: Path | None) -> Path | None:
+    """The `<kb_root>/<kb>/content` root a document lives under, if any."""
+    if document_path is None:
+        return None
+    for parent in document_path.parents:
+        if parent.name == "content":
+            return parent
+    return None
+
+
+def _within(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def _annotate_evidence(
