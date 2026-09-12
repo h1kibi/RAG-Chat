@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Fixed — 平台标记丢失导致 Linux 装不上
+
+`requirements.txt` 把 `pywin32==312` 无条件钉住，但它只是 `mcp` 在 Windows 上的依赖
+（`sys_platform == 'win32'`），而 pywin32 在 Linux/macOS 上没有 wheel。于是文档给出的安装命令
+`pip install -r requirements.txt` 在这两个平台上**直接失败**，而 Windows 上怎么看都是对的——
+只有非 Windows 用户才会撞上。现在该行保留环境标记：Windows 仍安装 312，Linux 跳过。
+
+同时确认测试套件不依赖 Ollama：把 provider 指向死端口后 **338 项全部通过**，因此可以在无
+Ollama 的 CI/隔离环境里跑。
+
+新增用例断言：每个钉住项都必须带版本；Windows 专属发行版必须带环境标记，且在 Linux 上求值为
+False（去掉标记后用例确实失败）。
+
+测试 338 → 340。
+
 ### Fixed — 空 postings 索引被算作「不可用」
 
 postings 侧车用 docs 文件的 `size+mtime_ns` 做指纹，所以**拷贝或克隆知识库后指纹必然失效**。

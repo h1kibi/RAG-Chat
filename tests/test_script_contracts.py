@@ -94,5 +94,52 @@ class SidecarFailureTests(unittest.TestCase):
             self.assertIn(flag, command)
 
 
+class RequirementPinTests(unittest.TestCase):
+    """The pinned lock must stay installable on the platforms it claims.
+
+    Windows-only distributions were pinned without their environment marker, so
+    `pip install -r requirements.txt` failed outright on Linux and macOS (no
+    wheel exists for pywin32 there). Nothing in the Windows test run could
+    notice, because on Windows the pin is correct either way.
+    """
+
+    REQUIREMENTS = SCRIPTS.parent / "requirements.txt"
+
+    def _pins(self):
+        from packaging.requirements import Requirement
+
+        lines = self.REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+        return [
+            Requirement(line.strip())
+            for line in lines
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    def test_every_pin_parses_and_is_version_locked(self):
+        pins = self._pins()
+        self.assertTrue(pins, "requirements.txt has no pins")
+        for pin in pins:
+            self.assertTrue(pin.specifier, f"{pin.name} is not pinned to a version")
+
+    def test_windows_only_distributions_are_marked(self):
+        from packaging.markers import default_environment
+
+        windows_only = {"pywin32", "pypiwin32", "pywinpty"}
+        for pin in self._pins():
+            if pin.name.lower() not in windows_only:
+                continue
+            self.assertIsNotNone(
+                pin.marker,
+                f"{pin.name} is Windows-only and must carry its environment marker, "
+                "or the lock cannot install on Linux/macOS",
+            )
+            environment = dict(default_environment())
+            environment["sys_platform"] = "linux"
+            self.assertFalse(
+                pin.marker.evaluate(environment),
+                f"{pin.name} must not be installed on Linux",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,10 @@
 # provisioned from a wheelhouse without re-resolving anything. `langchain-*` is
 # required only by `python -m rag_service.build_cosine`, which unpickles the
 # docstore written by the upstream index builder.
+#
+# Platform-specific pins keep their environment marker. `pywin32` is pulled in by
+# `mcp` only on Windows; pinning it unconditionally made `pip install -r
+# requirements.txt` fail on Linux and macOS, where no wheel exists.
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.3
 aiosignal==1.4.0
@@ -54,7 +58,7 @@ pygments==2.21.0
 pytest==9.1.1
 python-dotenv==1.2.3
 python-multipart==0.0.32
-pywin32==312
+pywin32==312; sys_platform == "win32"
 pyyaml==6.0.3
 referencing==0.37.0
 requests==2.34.2
