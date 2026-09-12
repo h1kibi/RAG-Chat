@@ -393,5 +393,5 @@ cd <repo>
 当前验收基线：
 
 ```text
-280 tests OK
+303 tests OK
 ```

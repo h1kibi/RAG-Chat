@@ -186,6 +186,12 @@ class FaissBackend(RetrievalBackend):
         self.close()
 
     def search(self, request: RetrievalRequest) -> List[SearchResult]:
+        # The degraded marker is per call, not per thread. Without this reset it
+        # sticks for the life of the worker thread, so every query after a
+        # transient provider outage is labelled lexical-only even once the dense
+        # path succeeds -- and callers are told to distrust correct cosine
+        # scores.
+        self._reset_search_state()
         chunk_id = str((request.filters or {}).get("chunk_id") or "").strip()
         if chunk_id and request.query.strip():
             # Silently ignoring it would return unrelated ranked results while
@@ -522,6 +528,21 @@ class FaissBackend(RetrievalBackend):
             raise RagIndexNotReadyError(
                 f"knowledge base '{knowledge_base}' browse index is invalid"
             )
+        # Query mode refuses a sidecar whose source fingerprint no longer matches
+        # (see _load_store). Browse read the same manifest but never compared it,
+        # so after a rebuild that skipped build_cosine every browse path kept
+        # serving documents from the previous index while queries correctly
+        # refused -- stale evidence in exactly the mode agents use to verify a
+        # citation. Same check, same error.
+        try:
+            _read_current_manifest(
+                manifest_path, index_path / "index.faiss", index_path / "index.pkl"
+            )
+        except Exception as exc:
+            raise RagIndexNotReadyError(
+                f"knowledge base '{knowledge_base}' standalone files are stale or unreadable; "
+                "re-run `python -m rag_service.build_cosine`"
+            ) from exc
         return _load_or_build_source_ranges(docs_path, rows)
 
     def _browse_chunk(self, request: RetrievalRequest, chunk_id: str) -> List[SearchResult]:

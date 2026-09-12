@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+### Fixed — 首轮质检（pre-release）
+
+从「克隆下来能不能用」的角度复检，修复以下问题：
+
+- **`.gitignore` 吞掉了测试夹具**（发布阻断）：裸 `data/` 在 git 中匹配任意深度，导致
+  `tests/data/retrieval_queries.jsonl` 从未入库。新克隆上 `test_evaluate_labels.py` 直接
+  `FileNotFoundError`，且文档里所有评测流程都无法运行——而本地因为文件恰好在磁盘上，测试全绿。
+  规则改为锚定仓库根 `/data/`。
+- **降级标记粘在线程上**：`_reset_search_state()` 定义了但从未调用，嵌入提供方短暂中断后，
+  同一线程上后续**成功**的查询仍被标为 `degraded=lexical-only`，并在工具文本里加
+  `DEGRADED`，让调用方不要相信正确的余弦分数。改为每次 `search()` 开始重置。
+- **浏览模式跳过 sidecar 时效校验**：`_browse_ranges` 只核对行数，不比对源文件指纹，
+  于是索引重建但未重跑 `build_cosine` 时，语料索引/来源列表/文档分页仍返回**旧索引**的文档，
+  而查询路径正确报错。三种浏览路径现在与查询同样的校验、同样的错误。
+- **CLI 把范围错误抛成 pydantic 回溯**：`--top-k 0`、`--filters year=1800` 等打印内部堆栈。
+  现在输出字段级错误并返回退出码 `2`；索引未就绪返回 `3`。其他入口（MCP/OpenAI/HTTP）
+  本来就这么做，只剩 CLI 没转换。
+- **`create_langchain_tool` 的 ImportError 不可操作**：`langchain-core` 只在 `[index]` extra 中，
+  基础安装下只报裸 `ModuleNotFoundError`。现在指明要装的 extra。
+- **空字符串布尔环境变量反转默认值**：`AGENT_RAG_ENABLED=`（写在 shell profile 里）会把检索
+  关掉，而语义应是「未配置」。数字/布尔值无法解析时现在报出变量名。
+- **`/api/health` 把可用端点报成不可用**：不实现 `GET /models` 的 OpenAI 兼容网关会被标红，
+  尽管对话正常。404/405 时回退到一次最小补全请求，结论确定。
+- **health 每次调用重开索引**：大语料上一次约 1 GB 读取，而 UI 每次加载都会轮询。成功结果改为
+  记忆化；失败仍每次重查（索引可能只是还没建）。
+- **Agent 丢失「检索过但没命中」与「DEGRADED」信号**：检索服务在自己的工具文本里会写这两件事，
+  Agent 路径上却被丢掉，于是模型可能把自己的知识当成语料证据回答。现在两者都进 prompt，
+  并在 UI 上显示降级提示。
+- **`--check` 在检索不可用时仍返回 0**，部署门禁无法发现坏索引。现在 `1` = 检索不可用、`2` = 无可用模型。
+- 文档：README 写了代码不读的 `expected_sources` 键名；重建命令缺 `-ServerRoot`；
+  MCP.md 的 `mcp==1.12.0` 与锁定的 1.12.4 不一致；测试基线从 271 更新到实际值；
+  `untrusted_evidence` 被写成请求参数（实际是响应字段，传入会 422）。
+
+测试从 280 增至 303：新增 `tests/test_backend_state.py`（降级标记、sidecar 时效）与
+`tests/test_agent_llm.py`（provider 探测、SSE 流解析），并补充配置与证据渲染的回归用例。
+每个修复都在回退后验证过「测试确实失败」。
+
 ### Added — `agent_service` v0.1.0rc1
 
 离线优先的本地 Web 问答。新增模块，之前不存在。

@@ -125,6 +125,29 @@ class ValidationTests(unittest.TestCase):
             config = AgentConfig.from_environment()
         self.assertFalse(config.rag_enabled)
 
+    def test_a_blank_flag_means_unset_and_keeps_the_default(self):
+        # `AGENT_RAG_ENABLED=` in a shell profile must not silently disable
+        # retrieval; a blank value is "not configured", not "false".
+        with _env(AGENT_RAG_ENABLED=""):
+            config = AgentConfig.from_environment()
+        self.assertTrue(config.rag_enabled)
+
+    def test_unrecognised_boolean_names_the_variable(self):
+        with _env(AGENT_RAG_ENABLED="maybe"):
+            with self.assertRaisesRegex(ValueError, "AGENT_RAG_ENABLED"):
+                AgentConfig.from_environment()
+
+    def test_unparseable_numbers_name_the_variable(self):
+        with _env(AGENT_PORT="not-a-port"):
+            with self.assertRaisesRegex(ValueError, "AGENT_PORT"):
+                AgentConfig.from_environment()
+
+    def test_blank_numeric_values_fall_back_to_defaults(self):
+        with _env(AGENT_PORT="", AGENT_TEMPERATURE=""):
+            config = AgentConfig.from_environment()
+        self.assertEqual(config.port, 8801)
+        self.assertEqual(config.temperature, 0.2)
+
 
 def _ollama_stub():
     from agent_service.config import LlmProvider

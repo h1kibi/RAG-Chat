@@ -8,7 +8,16 @@ from rag_service.service import RagService
 
 def create_langchain_tool(service: RagService, *, name: str = "search_knowledge_base", description: Optional[str] = None):
     """Create a LangChain-compatible tool without coupling the service to an LLM."""
-    from langchain_core.tools import StructuredTool
+    try:
+        from langchain_core.tools import StructuredTool
+    except ModuleNotFoundError as exc:
+        # langchain-core is not a base dependency (only the `index` extra needs
+        # it), so the bare ModuleNotFoundError gives no hint that the fix is an
+        # extra rather than a code change.
+        raise ModuleNotFoundError(
+            "create_langchain_tool requires langchain-core; install it with "
+            "`pip install 'local-rag-agent[index]'` or `pip install langchain-core`"
+        ) from exc
 
     def search_knowledge_base(
         query: str = "",

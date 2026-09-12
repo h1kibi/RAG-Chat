@@ -1,9 +1,13 @@
-# Runtime and data roots (never commit local corpora or indexes)
-C:/RAG-Agent-Data/
+# Runtime and data roots (never commit local corpora or indexes).
+# Anchored to the repository root: an unanchored `data/` also matches
+# `tests/data/`, which silently excluded the golden query fixture that the
+# evaluation tests and scripts read.
 /data/
-sources/
+/sources/
 
-# Vendored upstream used only to build the index; see README "构建索引"
+# Vendored upstream used only to build the index; see README "构建索引".
+# The runtime data root (e.g. C:\RAG-Agent-Data) lives outside the repository,
+# so it needs no rule here.
 LangGraph-Chatchat/
 
 # Environments

@@ -16,7 +16,7 @@
 │                       离线 Ollama，或填 API Key 走云端
 ├── knowledge-base/     知识库模板（Git 内）
 ├── scripts/            建库与导入脚本
-└── tests/              280 个测试
+└── tests/              303 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -79,6 +79,8 @@ $env:AGENT_RAG_KNOWLEDGE_BASE = 'cybersec'
 .\.venv\Scripts\python.exe -m agent_service --check
 .\.venv\Scripts\python.exe -m agent_service --print-config   # 脱敏，不含 API Key
 ```
+
+`--check` 的退出码可以直接给部署脚本用：`0` 全部就绪；`1` 模型可用但检索不可用（问答降级为纯对话）；`2` 没有可用模型（完全无法回答）。
 
 ### 4. 起 RAG 工具（给第三方 Agent 用）
 

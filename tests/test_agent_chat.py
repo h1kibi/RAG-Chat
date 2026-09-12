@@ -88,6 +88,32 @@ class EvidenceFormattingTests(unittest.TestCase):
         second = [block for block in text.split("\n\n") if block.startswith("[2]")][0]
         self.assertTrue(second.startswith("[2] source=09_hacktricks/1.md"), second)
 
+    def test_an_empty_search_is_stated_so_absence_is_not_read_as_silence(self):
+        # Without this the model cannot tell "the corpus lacks this" from "the
+        # tool was never called", and answers from its own knowledge instead.
+        text = format_evidence({"results": [], "no_match": True}, 4_000)
+        self.assertIn("未命中", text)
+
+    def test_degraded_ranking_is_declared_before_the_scores(self):
+        # A DEGRADED score column is lexical, not a cosine similarity; the model
+        # must be told before it reads the numbers as similarity.
+        response = self._response()
+        response["degraded"] = "lexical-only"
+        text = format_evidence(response, 4_000)
+        self.assertIn("DEGRADED (lexical-only)", text)
+        self.assertIn("不是余弦相似度", text)
+        self.assertLess(text.index("DEGRADED"), text.index("[1] source="))
+
+    def test_degraded_absence_is_not_evidence_of_absence(self):
+        text = format_evidence(
+            {"results": [], "no_match": True, "degraded": "lexical-only"}, 4_000
+        )
+        self.assertIn("DEGRADED", text)
+        self.assertIn("不能作为", text)
+
+    def test_a_plain_empty_response_adds_no_evidence_section(self):
+        self.assertEqual(format_evidence({"results": []}, 4_000), "")
+
     def test_evidence_is_numbered_so_the_model_can_refer_to_it(self):
         text = format_evidence(self._response(), 4_000)
         self.assertTrue(text.startswith("[1] "))

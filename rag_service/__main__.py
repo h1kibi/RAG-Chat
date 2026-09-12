@@ -28,6 +28,11 @@ import json
 import os
 import sys
 
+from pydantic import ValidationError
+
+from rag_service.errors import RagIndexNotReadyError
+from rag_service.models import RetrievalRequest
+
 _FILTER_INT_KEYS = frozenset({"year"})
 _FILTER_LIST_KEYS = frozenset({"exclude_source_prefix"})
 _FILTER_KEYS = frozenset(
@@ -106,8 +111,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def build_request(args: argparse.Namespace):
     """Translate parsed CLI arguments into a validated ``RetrievalRequest``."""
-    from rag_service.models import RetrievalRequest
-
     return RetrievalRequest(
         query=args.query,
         knowledge_base=args.knowledge_base,
@@ -123,6 +126,7 @@ def build_request(args: argparse.Namespace):
 def run_search(args: argparse.Namespace) -> int:
     from rag_service.backends.faiss import FaissBackend
     from rag_service.config import RagConfig
+    from rag_service.models import describe_validation_error
     from rag_service.service import RagService
 
     if args.kb_root:
@@ -131,6 +135,16 @@ def run_search(args: argparse.Namespace) -> int:
     backend = FaissBackend(config)
     try:
         response = RagService(config, backend).search(build_request(args))
+    except (ValueError, ValidationError) as exc:
+        # Every other entry point translates these into a field-level message
+        # (MCP's _check_arguments, the OpenAI adapter, the HTTP 400/422 handler);
+        # here they escaped as a raw pydantic dump, which reads as a crash
+        # rather than "your --top-k must be at least 1".
+        print(f"error: {describe_validation_error(exc)}", file=sys.stderr)
+        return 2
+    except RagIndexNotReadyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     finally:
         backend.close()
     if args.json:

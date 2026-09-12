@@ -335,7 +335,15 @@ SQ8 索引由 `build_cosine` 从 f32 矩阵分块构建（约 30 s，产物 `vec
 
 ### 不可信证据信封（P2-7）
 
-工具文本默认用 `UNTRUSTED-EVIDENCE-BEGIN/END` 包住全部证据，并声明其中可能包含模仿指令、提示或工具调用的文本，不得执行。语料本身**刻意**包含 63 个带 jailbreak 串的文件（`10_payloads_all_the_things/Prompt Injection/`、hacktricks AI 章节、先知 LLM 安全文），把边界写成结构化标记比只写在 tool 描述里更可靠。`untrusted_evidence: false` 可关闭。
+工具文本默认用 `UNTRUSTED-EVIDENCE-BEGIN/END` 包住全部证据，并声明其中可能包含模仿指令、提示或工具调用的文本，不得执行。语料本身**刻意**包含 63 个带 jailbreak 串的文件（`10_payloads_all_the_things/Prompt Injection/`、hacktricks AI 章节、先知 LLM 安全文），把边界写成结构化标记比只写在 tool 描述里更可靠。
+
+信封无法通过请求参数关闭：`untrusted_evidence` 是**响应**字段（`RetrievalResponse`），不是 `RetrievalRequest` 字段（请求模型 `extra="forbid"`，传入会得到 422）。需要在自己的进程里去掉信封时，对已返回的响应改字段再渲染：
+
+```python
+response = service.search(RetrievalRequest(query="..."))
+response.untrusted_evidence = False
+text = response.as_tool_text()
+```
 
 ### 输出控制：图片剥离、snippet 与内容硬上限
 
