@@ -114,6 +114,27 @@ class EvidenceFormattingTests(unittest.TestCase):
     def test_a_plain_empty_response_adds_no_evidence_section(self):
         self.assertEqual(format_evidence({"results": []}, 4_000), "")
 
+    def test_browse_results_render_despite_all_optional_fields_being_none(self):
+        # SearchResult declares source/chunk_id/score Optional and the browse
+        # paths emit None for all three. An f-string format spec on None raises
+        # TypeError, which the chat layer then reported as "retrieval
+        # unavailable" -- a misleading warning for a blank query.
+        browse = {
+            "results": [
+                {
+                    "source": None,
+                    "chunk_id": None,
+                    "score": None,
+                    "content": "Knowledge base index: 00_foundations (1 documents)",
+                    "metadata": {"browse": True},
+                }
+            ]
+        }
+        text = format_evidence(browse, 4_000)
+        self.assertIn("source=unknown", text)
+        self.assertIn("score=n/a", text)
+        self.assertIn("Knowledge base index", text)
+
     def test_evidence_is_numbered_so_the_model_can_refer_to_it(self):
         text = format_evidence(self._response(), 4_000)
         self.assertTrue(text.startswith("[1] "))

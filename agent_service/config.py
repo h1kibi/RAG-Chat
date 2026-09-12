@@ -203,6 +203,15 @@ class AgentConfig:
         cloud_base_url = os.getenv("AGENT_CLOUD_BASE_URL", "").strip()
         cloud_models = _env_list("AGENT_CLOUD_MODELS")
         cloud_api_key = _cloud_api_key()
+        if bool(cloud_base_url) != bool(cloud_models):
+            # Half a cloud configuration is a mistake, and silently dropping the
+            # provider would leave the operator with no cloud option and no
+            # explanation. Name the missing variable.
+            missing = "AGENT_CLOUD_MODELS" if cloud_base_url else "AGENT_CLOUD_BASE_URL"
+            raise ValueError(
+                f"cloud provider is partially configured: set {missing} as well "
+                "(or unset both to run offline only)"
+            )
         if cloud_base_url and cloud_models:
             providers.append(
                 LlmProvider(

@@ -59,7 +59,7 @@
 
 <footer>
   <div class="composer">
-    <textarea id="input" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+    <textarea id="input" rows="1" maxlength="20000" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
     <button class="primary" id="send">发送</button>
   </div>
   <div class="hintline" id="authline" hidden>
@@ -176,23 +176,43 @@ async function send() {
   const headers = { "Content-Type": "application/json" };
   if (state.token) headers.Authorization = "Bearer " + state.token;
 
+  // Send only the tail the server actually uses. It trims to `history_len`
+  // anyway (default 10), so this changes nothing about the answer -- but it
+  // keeps the payload under `ChatTurn`'s 200-message cap, which the transcript
+  // would otherwise exceed in a long conversation and wedge every later send on
+  // a 422.
+  const historyLen = Math.max(1, (state.config && state.config.history_len) || 10);
+  const outgoing = state.messages.slice(-historyLen);
+
   let answer = "";
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers,
       body: JSON.stringify({
-        messages: state.messages,
+        messages: outgoing,
         provider: $("provider").value,
         model: $("model").value,
         use_rag: $("rag").checked,
       }),
     });
     if (!res.ok) {
+      // FastAPI returns validation failures as a list of {loc, msg} objects, so
+      // concatenating `detail` yields "[object Object]" and discards the reason.
       let detail = `HTTP ${res.status}`;
-      try { detail = (await res.json()).detail || detail; } catch (_) {}
+      try {
+        const body = await res.json();
+        if (Array.isArray(body.detail)) {
+          detail = body.detail.map((item) => item.msg || JSON.stringify(item)).join("; ");
+        } else if (body.detail) {
+          detail = body.detail;
+        }
+      } catch (_) {}
       if (res.status === 401) $("autherr").textContent = "Token 无效";
       note(wrap, "请求失败：" + detail, true);
+      // Drop the rejected turn from the transcript: leaving it in would resend
+      // the identical failing payload on every retry. It stays visible above.
+      state.messages.pop();
       return;
     }
 

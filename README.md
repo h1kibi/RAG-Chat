@@ -16,7 +16,7 @@
 │                       离线 Ollama，或填 API Key 走云端
 ├── knowledge-base/     知识库模板（Git 内）
 ├── scripts/            建库与导入脚本
-└── tests/              303 个测试
+└── tests/              305 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。

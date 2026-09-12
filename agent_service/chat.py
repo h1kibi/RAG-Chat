@@ -101,10 +101,14 @@ def format_evidence(response: Dict[str, Any], limit_chars: int) -> str:
     blocks: List[str] = []
     used = 0
     for index, result in enumerate(results, start=1):
-        header = (
-            f"[{index}] source={result.get('source', 'unknown')} "
-            f"chunk_id={result.get('chunk_id', '?')} score={result.get('score', 0):.3f}"
-        )
+        # `source`, `chunk_id` and `score` are all Optional in SearchResult and
+        # the browse paths emit None for every one of them, so neither the
+        # `.get` default nor an f-string format spec can be assumed to apply.
+        source = result.get("source") or "unknown"
+        chunk_id = result.get("chunk_id") or "?"
+        score = result.get("score")
+        rendered_score = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
+        header = f"[{index}] source={source} chunk_id={chunk_id} score={rendered_score}"
         # Reuse the retrieval layer's renderer so the version/arch/CVE facts the
         # evidence states appear verbatim next to the citation, in the same form
         # the MCP tool text uses. Metadata `facts` is a mapping, not a string.

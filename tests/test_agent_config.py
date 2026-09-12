@@ -49,6 +49,16 @@ class CloudProviderTests(unittest.TestCase):
 
         self.assertEqual([provider.id for provider in config.providers], ["ollama"])
 
+    def test_a_half_configured_cloud_provider_fails_loudly(self):
+        # Dropping it silently would leave the operator with no cloud option and
+        # no explanation of why.
+        with _env(AGENT_CLOUD_BASE_URL="https://example.invalid/v1"):
+            with self.assertRaisesRegex(ValueError, "AGENT_CLOUD_MODELS"):
+                AgentConfig.from_environment()
+        with _env(AGENT_CLOUD_MODELS="glm-5.3-flash"):
+            with self.assertRaisesRegex(ValueError, "AGENT_CLOUD_BASE_URL"):
+                AgentConfig.from_environment()
+
     def test_cloud_provider_reads_the_key_from_an_indirect_variable(self):
         with _env(
             AGENT_CLOUD_BASE_URL="https://open.bigmodel.cn/api/paas/v4",
