@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+### Added — 对话按 Markdown 渲染
+
+助手输出此前是纯文本（`textContent` + `pre-wrap`），代码、列表、表格都摊平成一段字。现在用成熟
+开源渲染器：**marked 15.0.7**（MIT，CommonMark/GFM）解析，**DOMPurify 3.2.4**
+（Apache-2.0/MPL-2.0）清洗，实测支持标题、粗斜体、删除线、有序/无序列表、行内代码、带语言的
+代码块、表格、引用块、链接与分隔线。
+
+两个关键决策：
+
+- **库内置而非引用 CDN**。UI 的承诺是「无外部依赖，离线可加载」，主场景是断网机器；一个 CDN
+  引用会让断网时页面直接失去格式。两个文件（62 KB）随包发布，许可证与来源记在
+  `static/vendor/README.md`，并纳入 `package-data`（非可编辑安装也已验证包含）。
+- **清洗是必需的，不是可选项**。模型输出受检索片段影响，而语料**刻意包含** 63 个带 jailbreak
+  串的文件；把这类文本解析成 HTML 而不清洗，等于让被投毒的文章在操作者浏览器里执行脚本。
+  允许列表不含 `script`/`iframe`/`style`/`form`/`object`/`embed`，URL 正则只放行
+  `http(s)`/`mailto`/锚点/同源路径。若清洗确实移除了内容，页面显示「部分内容已被安全过滤」，
+  不静默给出残缺回答。
+
+浏览器实测 15 例：9 项合法 Markdown（标题/列表/代码块/表格/链接/引用/分隔线/相对链接/autolink）
+全部原样保留；6 项攻击 payload（`<script>`、`<img onerror>`、`<iframe>`、`<style>`、
+`javascript:` href、`data:` URL）全部被剥离，且 `document.title` 未被改动——**零执行**。
+
+工程细节：流式输出按 `requestAnimationFrame` 合并重绘（否则每个 delta 都重解析整段）；
+vendor 加载失败时降级为纯文本并去掉 `md` 类（空白回答比没有格式更糟）；清洗检测不用
+`DOMPurify.removed`（对完全合法的输入它也会报条目），改为用 `DOMParser` 对「解析结果」与
+「清洗结果」做结构指纹比对——注意不能用活动文档做归一化，测试中把 `<style>` 赋进真实 DOM
+会全局生效并卡死页面。
+
+新增 `tests/test_ui_assets.py`（11 项）守住这些契约：库文件存在且非残缺、许可证随附、页面
+**不含任何外部 URL**、Markdown 必须经过清洗、允许列表不含脚本类标签、URL 正则不放行
+`data:`/`javascript:`、过滤提示存在、缺库时降级。五类回归（换 CDN、去掉 sanitize、放行
+`script`、放行 `data:`、去掉提示）均验证过**用例确实失败**。
+
+测试 348 → 359。
+
 ### Fixed — 回答「输出一半卡住」（推理模型的 token 预算）
 
 用户报告：在页面提问后回答输出一半就不动了。实测复现后是**两个叠加的缺陷**，都与推理模型有关：

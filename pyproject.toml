@@ -51,7 +51,8 @@ build-backend = "setuptools.build_meta"
 packages = ["rag_service", "rag_service.backends", "agent_service"]
 
 [tool.setuptools.package-data]
-agent_service = ["static/*.html"]
+# The UI loads these from /static at runtime, so they must ship in the wheel.
+agent_service = ["static/*.html", "static/vendor/*.js", "static/vendor/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

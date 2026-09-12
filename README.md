@@ -17,7 +17,7 @@
 ├── knowledge-base/     知识库模板（Git 内，8 篇示例文档）
 ├── examples/demo-kb/   演示索引（93 KB），开箱即可查询
 ├── scripts/            建库与导入脚本
-└── tests/              348 个测试
+└── tests/              359 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -293,7 +293,7 @@ $env:ZAI_API_KEY = '...'
 
 | Method | Path | 说明 |
 |---|---|---|
-| GET | `/` | 单页聊天 UI（无外部依赖，离线可加载） |
+| GET | `/` | 单页聊天 UI（Markdown 渲染；依赖本地内置，离线可加载） |
 | GET | `/api/config` | 脱敏配置：provider、模型、RAG 开关 |
 | GET | `/api/health` | 每个 provider 的连通性 + 索引状态 |
 | POST | `/api/chat` | SSE 流式问答 |
@@ -302,6 +302,8 @@ $env:ZAI_API_KEY = '...'
 
 ### 行为约定
 
+- **回答按 Markdown 渲染**：助手输出经 `marked` 解析、`DOMPurify` 清洗后显示（标题/列表/代码块/表格/引用）。两个库都**内置在仓库里**（`agent_service/static/vendor/`，共 62 KB），不引用 CDN——断网环境必须能加载。
+- **清洗不可省略**：模型输出受检索片段影响，而语料**刻意包含 prompt-injection payload**；把这类文本解析成 HTML 而不清洗，等于让被投毒的文章在操作者浏览器里执行脚本。允许列表剔除 `script`/`iframe`/`style`/`form`，URL 仅放行 `http(s)`/`mailto`/锚点/同源路径（`javascript:` 与 `data:` 被拒）。若清洗确实移除了内容，页面会明示「部分内容已被安全过滤」，而不是静默给出残缺回答。
 - **检索失败不中断对话**：索引坏了或 Ollama 没起，只发一条 `warning` 然后走纯对话。断网现场不该因为索引问题让人没法用。
 - **不编造**：有证据时 system prompt 要求「片段没覆盖就说没有足够依据」并给出 `source + chunk_id`。
 - **错误可执行**：连不上本地模型时给的是「先 `ollama serve`，确认模型已 `ollama pull`」，不是裸的 `ConnectionError`。
@@ -344,7 +346,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 348 passed
+# 359 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。

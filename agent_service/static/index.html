@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234f8cff'/%3E%3Cpath d='M9 21V11h4.6a3.2 3.2 0 0 1 0 6.4H12V21z' fill='%23fff'/%3E%3Ccircle cx='21.5' cy='19.5' r='2.5' fill='%23fff'/%3E%3C/svg%3E">
+<!-- Vendored, not CDN: the UI must load with no network. See static/vendor/README.md. -->
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
 <title>本地资料库智能问答</title>
 <style>
   :root {
@@ -38,6 +41,39 @@
   details.evidence li { margin-bottom: 3px; word-break: break-all; }
   footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
            border-top: 1px solid var(--line); padding: 10px 16px; }
+
+  /* Markdown rendering inside assistant bubbles. User text stays pre-wrap. */
+  .bubble.md { white-space: normal; }
+  .bubble.md > *:first-child { margin-top: 0; }
+  .bubble.md > *:last-child { margin-bottom: 0; }
+  .bubble.md h1, .bubble.md h2, .bubble.md h3, .bubble.md h4 {
+    margin: 14px 0 6px; line-height: 1.35; font-weight: 600; }
+  .bubble.md h1 { font-size: 1.25em; } .bubble.md h2 { font-size: 1.15em; }
+  .bubble.md h3 { font-size: 1.05em; } .bubble.md h4 { font-size: 1em; }
+  .bubble.md p { margin: 8px 0; }
+  .bubble.md ul, .bubble.md ol { margin: 8px 0; padding-left: 22px; }
+  .bubble.md li { margin: 3px 0; }
+  .bubble.md li > p { margin: 0; }
+  .bubble.md a { color: var(--accent); }
+  .bubble.md code { font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: .9em; background: #0c0f14; border: 1px solid var(--line);
+    border-radius: 5px; padding: 1px 5px; word-break: break-word; }
+  .bubble.md pre { margin: 10px 0; padding: 10px 12px; overflow-x: auto;
+    background: #0c0f14; border: 1px solid var(--line); border-radius: 8px; }
+  .bubble.md pre code { background: none; border: 0; padding: 0; font-size: .88em;
+    line-height: 1.5; white-space: pre; }
+  .bubble.md blockquote { margin: 10px 0; padding: 2px 0 2px 12px;
+    border-left: 3px solid var(--line); color: var(--muted); }
+  .bubble.md table { margin: 10px 0; border-collapse: collapse; display: block;
+    overflow-x: auto; max-width: 100%; }
+  .bubble.md th, .bubble.md td { border: 1px solid var(--line); padding: 5px 9px;
+    text-align: left; }
+  .bubble.md th { background: #11141a; font-weight: 600; }
+  .bubble.md hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+  .bubble.md img { max-width: 100%; }
+  /* A render the sanitizer had to strip. Surfaced rather than hidden: silent
+     removal would leave the reader trusting a mutilated answer. */
+  .mdstripped { font-size: 12px; color: var(--warn); margin-top: 6px; }
   .composer { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
   textarea { flex: 1; resize: none; min-height: 42px; max-height: 180px; }
   .hintline { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
@@ -76,6 +112,108 @@ function el(tag, cls, text) {
   if (cls) node.className = cls;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+// Model output is rendered as Markdown, so it becomes HTML. That output is
+// influenced by retrieved corpus text, and the corpus by design contains
+// prompt-injection and jailbreak payloads (see rag_service README) -- so parsing
+// it without a sanitizer would let a poisoned document run script in the
+// operator's browser. DOMPurify is not optional here.
+//
+// `marked` is configured to be strict about what it emits; DOMPurify then
+// enforces the final allow-list regardless of what the parser produced.
+marked.use({
+  gfm: true,
+  breaks: true,          // chat text: a single newline is a line break, not a paragraph join
+  async: false,
+});
+
+const MARKDOWN_ALLOWED = {
+  ALLOWED_TAGS: [
+    "p", "br", "hr", "strong", "em", "del", "code", "pre", "blockquote",
+    "ul", "ol", "li", "a", "h1", "h2", "h3", "h4", "h5", "h6",
+    "table", "thead", "tbody", "tr", "th", "td", "img", "sup", "sub",
+  ],
+  ALLOWED_ATTR: ["href", "title", "src", "alt", "class", "align"],
+  // No javascript:/data: URLs, no form/iframe/style/script surfaces.
+  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#|\/)/i,
+};
+
+function renderMarkdown(text) {
+  // If a vendored file is missing (incomplete install, or the browser blocked
+  // it), degrade to the previous plain-text behaviour instead of throwing. A
+  // blank answer would be worse than an unformatted one.
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+    return { html: null, stripped: false };
+  }
+  const html = marked.parse(text);
+  const clean = DOMPurify.sanitize(html, MARKDOWN_ALLOWED);
+  return { html: clean, stripped: sanitizingChanged(html, clean) };
+}
+
+// Fingerprint via DOMParser rather than the live document: assigning a parsed
+// `<style>` into the real DOM would apply it globally (it stalled the page in
+// testing). Comparing what the parser produced against what survived sanitizing
+// says whether anything was dropped -- `DOMPurify.removed` is not a reliable
+// signal, it reports entries even for entirely benign input.
+function markdownFingerprint(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return Array.from(doc.querySelectorAll("*"), (node) =>
+    node.tagName + "[" + Array.from(node.attributes, (a) => a.name + "=" + a.value).sort().join(",") + "]"
+  ).join("|");
+}
+
+function sanitizingChanged(rawHtml, cleanHtml) {
+  if (rawHtml === cleanHtml) return false;
+  try {
+    return markdownFingerprint(rawHtml) !== markdownFingerprint(cleanHtml);
+  } catch (err) {
+    // Comparison itself failed; assume something was dropped rather than claim
+    // the output is intact.
+    return true;
+  }
+}
+
+function paintMarkdown(bubble, text) {
+  const { html, stripped } = renderMarkdown(text);
+  if (html === null) {
+    bubble.classList.remove("md");
+    bubble.textContent = text;
+    return;
+  }
+  bubble.classList.add("md");
+  bubble.innerHTML = html;
+  const existing = bubble.parentElement.querySelector(".mdstripped");
+  if (stripped && !existing) {
+    const warn = el("div", "mdstripped");
+    warn.textContent = "部分内容已被安全过滤（来源文本可能包含脚本或嵌入标记）";
+    bubble.parentElement.appendChild(warn);
+  } else if (!stripped && existing) {
+    existing.remove();
+  }
+}
+
+// Streaming delivers many small deltas. Parsing the whole answer per delta would
+// re-render the bubble hundreds of times; coalescing to one paint per frame
+// keeps it smooth and still shows text arriving.
+function schedulePaint(bubble, text) {
+  if (bubble.dataset.pending === "1") {
+    bubble.dataset.next = text;
+    return;
+  }
+  bubble.dataset.pending = "1";
+  requestAnimationFrame(() => {
+    const latest = bubble.dataset.next || text;
+    delete bubble.dataset.next;
+    bubble.dataset.pending = "0";
+    paintMarkdown(bubble, latest);
+    window.scrollTo(0, document.body.scrollHeight);
+  });
+}
+
+function renderMarkdownOnce(bubble, answer) {
+  bubble.classList.add("md");
+  paintMarkdown(bubble, answer);
 }
 
 function render(role, text) {
@@ -174,6 +312,9 @@ async function send() {
   render("user", text);
   state.messages.push({ role: "user", content: text });
   const { wrap, bubble } = render("assistant", "");
+  // Set before the first delta so the bubble switches from `pre-wrap` to
+  // rendered-markdown spacing for the whole stream, not just at the end.
+  bubble.classList.add("md");
   const sendButton = $("send");
   state.busy = true;
   sendButton.disabled = true;
@@ -248,8 +389,7 @@ async function send() {
         const event = JSON.parse(line.slice(5).trim());
         if (event.type === "delta") {
           answer += event.text;
-          bubble.textContent = answer;
-          window.scrollTo(0, document.body.scrollHeight);
+          schedulePaint(bubble, answer);
         } else if (event.type === "retrieval") {
           if (event.results && event.results.length) showEvidence(wrap, event);
           // `degraded` changes what the score column means, so it is shown as a
@@ -270,7 +410,12 @@ async function send() {
     note(wrap, "连接中断：" + err, true);
   } finally {
     clearInterval(ticker);
-    if (answer.trim()) state.messages.push({ role: "assistant", content: answer });
+    if (answer.trim()) {
+      // Final render is unconditionally Markdown: the streaming path coalesces
+      // per frame, so the last delta may not have been painted yet.
+      renderMarkdownOnce(bubble, answer);
+      state.messages.push({ role: "assistant", content: answer });
+    }
     state.busy = false;
     sendButton.disabled = false;
     sendButton.textContent = "发送";
