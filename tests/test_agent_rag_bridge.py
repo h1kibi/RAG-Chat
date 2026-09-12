@@ -80,6 +80,29 @@ class AgentRagBridgeTests(unittest.TestCase):
                     filters={"category": "14_ctf_wp", "year": 2014},
                 )
 
+    def test_a_malformed_http_timeout_names_the_variable(self):
+        # The agent relays this message verbatim as its degradation warning, so
+        # a bare float() error read as "retrieval is broken".
+        with patch.dict(
+            os.environ,
+            {"RAG_SERVICE_URL": "http://127.0.0.1:8791", "RAG_HTTP_TIMEOUT": "30s"},
+        ):
+            with self.assertRaisesRegex(ValueError, "RAG_HTTP_TIMEOUT") as ctx:
+                search_knowledge_base(query="x", knowledge_base="cybersec")
+
+        self.assertIn("'30s'", str(ctx.exception))
+
+    def test_a_blank_http_timeout_falls_back_to_the_default(self):
+        with patch.dict(
+            os.environ,
+            {"RAG_SERVICE_URL": "http://127.0.0.1:8791", "RAG_HTTP_TIMEOUT": ""},
+        ):
+            with patch("rag_service.http_client.RagHttpClient") as mock_client_cls:
+                mock_client_cls.return_value.search_dict.return_value = {"total": 0}
+                search_knowledge_base(query="x", knowledge_base="cybersec")
+
+        self.assertEqual(mock_client_cls.call_args.kwargs["timeout"], 120.0)
+
 
 if __name__ == "__main__":
     unittest.main()

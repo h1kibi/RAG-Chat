@@ -949,6 +949,84 @@ class BrowseCombinationTests(unittest.TestCase):
             )
 
 
+class InProcessAdapterTests(unittest.TestCase):
+    """`register_mcp_tool` is a documented entry point (MCP.md §12).
+
+    It had no coverage, which let two defects live: registration raised before
+    the host server ever started, and validation leaked pydantic's dump.
+    """
+
+    @staticmethod
+    def _empty_response() -> RetrievalResponse:
+        return RetrievalResponse(
+            query="q",
+            knowledge_base="cybersec",
+            results=[],
+            total=0,
+            backend="faiss",
+        )
+
+    def _call(self, name="rag_lookup", **arguments):
+        """Register on a REAL FastMCP server and invoke through it.
+
+        Returns ``(structured_payload, listed_tools)``. ``call_tool`` yields a
+        ``(content_blocks, payload)`` pair; the payload is what an MCP client
+        receives as structured content.
+        """
+        import asyncio
+
+        from mcp.server.fastmcp import FastMCP
+
+        from rag_service.mcp_adapter import register_mcp_tool
+
+        backend = FaissBackend(_config())
+        service = RagService(backend.config, backend)
+        server = FastMCP("host-app")
+        try:
+            register_mcp_tool(server, service, name=name)
+            listed = asyncio.run(server.list_tools())
+            _, payload = asyncio.run(server.call_tool(name, arguments))
+            return payload, listed
+        finally:
+            backend.close()
+
+    def test_registration_succeeds_on_a_real_mcp_server(self):
+        # Regression: postponed annotations made every parameter a string, and
+        # the SDK's `issubclass(param.annotation, Context)` then raised
+        # TypeError during registration -- the server never came up.
+        with patch.object(FaissBackend, "search", return_value=[]), patch.object(
+            RagService, "search", return_value=self._empty_response()
+        ):
+            _, listed = self._call(query="q")
+        self.assertEqual([tool.name for tool in listed], ["rag_lookup"])
+        properties = listed[0].inputSchema.get("properties", {})
+        self.assertIn("query", properties)
+        self.assertIn("filters", properties)
+
+    def test_a_valid_call_returns_the_service_payload(self):
+        result = SearchResult(
+            content="evidence", score=0.9, source="a/b.md", chunk_id="cybersec:1"
+        )
+        response = RetrievalResponse(
+            query="q",
+            knowledge_base="cybersec",
+            results=[result],
+            total=1,
+            backend="faiss",
+        )
+        with patch.object(RagService, "search", return_value=response):
+            payload, _ = self._call(query="q")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["results"][0]["chunk_id"], "cybersec:1")
+
+    def test_invalid_arguments_report_a_fixable_message(self):
+        with self.assertRaises(Exception) as ctx:
+            self._call(query="x", top_k=0)
+        message = str(ctx.exception)
+        self.assertIn("top_k", message)
+        self.assertNotIn("errors.pydantic.dev", message)
+
+
 class ValidationSurfaceTests(unittest.TestCase):
     """Every entry point must fail with a usable message, not pydantic's dump."""
 

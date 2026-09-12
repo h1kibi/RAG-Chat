@@ -5,12 +5,16 @@ It measures both fused components separately, so the decision rests on data:
 
     .venv/Scripts/python.exe scripts/rag_threshold_band.py
 
-Findings for the current cybersec corpus (bge-m3, weight 0.35):
-the two distributions overlap (in-corpus dense 0.493-0.777, out-of-corpus
-0.480-0.680), so no threshold separates them cleanly. The fused gate at 0.45 is
-the best available operating point, and gating on the dense component instead is
-strictly worse. The gate moves with `lexical_weight`, which is why the service
-warns when that knob is raised.
+Findings for the current cybersec corpus (bge-m3, weight 0.35), over 16 positive
+and 12 off-corpus queries: the two fused distributions overlap (in-corpus
+0.487-0.831, off-corpus 0.345-0.547), so no threshold separates them cleanly.
+Gating on the dense component instead is strictly worse at the same operating
+point (0.45 keeps 16/16 positives but leaks 11/12 off-corpus, against 7/12 for
+the fused gate). Raising the fused gate to 0.50 or 0.55 keeps leaking under
+control but drops positives -- 0.50 loses the `CVE-2021-3490` case whose top1 is
+0.4866 -- so 0.45 is kept as the coarser filter and `RAG_LOW_SCORE_WARN` carries
+the "this result is weak" signal instead. The gate moves with `lexical_weight`,
+which is why the service warns when that knob is raised.
 """
 import json
 import os

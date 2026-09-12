@@ -20,7 +20,7 @@
 
 ## 维护命令：生成独立检索文件
 
-后端不直接加载 2.75 GB 的 `index.faiss`（避免一次性大内存分配），而是使用 `build_cosine` 转换出的三个文件：
+后端不直接加载 4.16 GB 的 `index.faiss`（避免一次性大内存分配），而是使用 `build_cosine` 转换出的产物：
 
 ```powershell
 cd <repo>
@@ -29,9 +29,16 @@ cd <repo>
 
 对每个知识库生成（原文件不被修改）：
 
-- `vectors.cos.f32` — 归一化向量，查询时 memmap 按需分页，常驻内存 ≈ 0；
+- `vectors.cos.f32` — 归一化向量，查询时 memmap 按需分页；float32 是权威来源，也是 int8/SQ8 缺失时的回退；
 - `docs.cos.jsonl` + `docs.cos.offsets.u64` — 每行文档与偏移，查询时只随机读 top_k 行；
+- `vectors.cos.int8` + `vectors.cos.scales.f32` — 过滤查询的子集打分用；`vectors.cos.sq8` — 全量扫描用（faiss `IndexScalarQuantizer`）；
+- `docs.cos.ranges.json` — source→行区间，路径过滤与浏览模式直接读取；
+- `docs.cos.postings` + `docs.cos.postings.idx.json` — 标识符倒排索引（含数字的 token），用于绕过 dense 排名强制召回；
 - `vectors.cos.json` — 产物清单（`cosine-v2`）：记录两个源文件的大小+mtime 指纹，任一源文件变化即视为过期。
+
+体积参考（`cybersec`，1,016,721 行）：`index.faiss` 4.16 GB、`vectors.cos.f32` 4.16 GB、`vectors.cos.sq8` / `.int8` 各 1.04 GB、`docs.cos.jsonl` 930 MB、`docs.cos.postings` 150 MB。
+
+辅助产物（int8 / SQ8 / postings / ranges）缺失或损坏都会自动回退，不会让检索失败；`build_cosine` 在基础产物已是最新时只补生成缺失的部分。
 
 产物先写入临时文件再原子替换，重建索引后执行本命令即可同步；若服务进程仍在读取旧产物（Windows 会锁定 memmap 文件），先停止服务再重建。
 
@@ -406,7 +413,7 @@ MCP 的 `ctf_rag` 完整参数：`query`（**默认 `""`**，空即浏览模式�
 
 #### 阈值带实测（0.45 的取舍）
 
-对 16 条正例与 10 条域外查询（中英混合、刻意"像真的"而非乱码）各取 top-1 分数：
+对 16 条正例与 12 条域外查询（11 条中英混合、刻意"像真的"而非乱码的探针 + 1 条标注负例）各取 top-1 分数：
 
 | 组 | min | median | max |
 | --- | --- | --- | --- |
@@ -417,11 +424,13 @@ MCP 的 `ctf_rag` 完整参数：`query`（**默认 `""`**，空即浏览模式�
 
 | 阈值 | 正例保留 | 域外放行 |
 | --- | --- | --- |
-| 0.45（默认） | 16/16 | 6/10 |
-| 0.50 | 15/16 | 2/10 |
-| 0.55 | 14/16 | 0/10 |
+| 0.45（默认） | 16/16 | 7/12 |
+| 0.50 | 15/16 | 2/12 |
+| 0.55 | 14/16 | 0/12 |
 
-**因此不把默认值提到 0.50**：`CVE-2021-3490` 的 top1 是 **0.4866**，一提升就会重新打回 `no_match`——也就是上一轮刚修掉的假阴性。用一条真实证据换 4 条域外噪声，方向是错的。
+上表由 `scripts/rag_threshold_band.py` 直接产出（同一次运行打印两个分量与各阈值的取舍），语料或探针集变化后应重跑。
+
+**因此不把默认值提到 0.50**：`CVE-2021-3490` 的 top1 是 **0.4866**，一提升就会重新打回 `no_match`——也就是上一轮刚修掉的假阴性。用一条真实证据换 5 条域外噪声，方向是错的。
 
 0.45 的角色是**粗过滤**而非判别器（与"score 不是置信度"一致）；域外查询之所以穿过去，多数是语义重叠而非阈值问题（如 `machine learning overfitting regularization` → 语料里的 AI/LLM 安全文，0.5467）。真正的补救是**让不确定性可见**：`RAG_LOW_SCORE_WARN`（默认 0.55）会在结果偏弱时于 `WARNINGS:` 段落提示，而该警告此前在成功路径上被丢弃——现已修复（见"运行期能力自检"）。需要更高精度时在请求级传 `score_threshold`。
 

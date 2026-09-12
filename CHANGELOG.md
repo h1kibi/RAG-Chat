@@ -4,6 +4,45 @@
 
 ## [Unreleased]
 
+### Fixed — 第八轮质检（文档化入口点执行、测量数据复核）
+
+本轮把「文档里写了、但从没被执行过」的路径全部跑了一遍，两个文档化入口点有问题：
+
+- **`rag_service/mcp_adapter.py` 在真实 MCP server 上注册即崩溃**（发布阻断）。该模块用了
+  `from __future__ import annotations`，于是所有注解都是字符串；MCP SDK 构造工具时会
+  `issubclass(param.annotation, Context)`，直接抛
+  `TypeError: issubclass() arg 1 must be a class`——宿主 server 根本起不来。
+  MCP.md §12 把它列为通用适配器，却**没有任何测试覆盖**。移除该 future import 后注册、schema、
+  调用全部正常（已在真实 `FastMCP` 上验证），并补上三处回归用例；把 future import 加回去会
+  立刻让用例失败。
+- **同一适配器泄漏 pydantic 原始 dump**：`top_k=0` 返回
+  `1 validation error for RetrievalRequest ... https://errors.pydantic.dev/...`，违反本仓库
+  自己写下的契约（"Every entry point must fail with a usable message, not pydantic's dump"）。
+  这是最后一个未转换的边界，因为它是唯一没有测试的入口。
+- **`RAG_HTTP_TIMEOUT` 非法值不报变量名**：`float()` 的裸错误经 Agent 降级链路原样转述为
+  「检索不可用，已降级为纯对话：could not convert string to float」，把配置笔误说成检索故障。
+  该变量读在 `agent_service/rag.py` 而非 config 模块，是上一轮「数值变量必须具名」修复的漏网项。
+
+文档与实测数据复核（跑完两个文档指定的工具后逐项核对）：
+
+- `rag_service/README.md` 说后端不加载 **2.75 GB** 的 `index.faiss`，实测 **4.16 GB**；同段
+  「转换出的三个文件」也已过时（现在还会产出 int8/scales/sq8/ranges/postings）。
+- `scripts/rag_threshold_band.py` docstring 的域外语料 dense 区间写 0.480，实测 0.446；
+  改为直接引用该脚本当前输出，并说明 0.45 相对 0.50/0.55 的取舍。
+- `rag_service/README.md` 阈值带表：域外样本数 10 → 12，0.45 的放行数 6 → 7（正例行与
+  分布行复核后与实测完全一致，只有这两处漂移）；随之修正「换 4 条域外噪声」为 5 条。
+
+复核通过、未改动的事实：`CVE-2021-3490` top1 = 0.48696、`machine learning overfitting
+regularization` = 0.54674、dense 行数 1,016,721、postings tokens 2,612,681 / 条数 4,277,333 /
+150 MB / stride 256、embedding 维度 1024、`mcp==1.12.4`、`pydantic==2.9.2`、`faiss-cpu==1.9.0`、
+sidecar 体积（f32 4.16 GB、sq8/int8 1.04 GB、jsonl 930 MB）。
+
+另外端到端验证：模板初始化器与导入器（含脱敏、噪声剥离、附件排除、幂等性）、
+`evaluate --threshold-scan`、`rag_threshold_band.py`、HTTP API 的鉴权与字段级错误、
+以及 Agent 远端模式 + 真实浏览器问答。
+
+测试从 325 增至 330。
+
 ### Fixed — 第七轮质检（健康字段自相矛盾）
 
 - **`/v1/rag/health` 在完全健康时报 `sq8_state=unreadable`**：`sq8_state` 回答的是
@@ -107,7 +146,7 @@ base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以�
 测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
 补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
 
-七轮累计：280 → 325 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
+八轮累计：280 → 330 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
 
 ### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
 

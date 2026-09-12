@@ -28,13 +28,32 @@ def _service():
         return _service_instance
 
 
+def _http_timeout() -> float:
+    """Read ``RAG_HTTP_TIMEOUT``, naming the variable when it does not parse.
+
+    A bare ``float()`` reported `could not convert string to float: '30s'`,
+    and the agent's degradation path relayed that verbatim as
+    "检索不可用，已降级为纯对话" -- so a typo in this variable looked like a
+    broken retrieval service rather than a configuration mistake. Every other
+    numeric knob in the repository names itself; this one is read here rather
+    than in a config module, which is how it was missed.
+    """
+    raw = os.getenv("RAG_HTTP_TIMEOUT", "120").strip()
+    if not raw:
+        return 120.0
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"RAG_HTTP_TIMEOUT must be a number, got {raw!r}") from exc
+
+
 def _http_search(**kwargs: Any) -> dict:
     from rag_service.http_client import RagHttpClient
 
     client = RagHttpClient(
         os.environ["RAG_SERVICE_URL"],
         api_token=os.getenv("RAG_API_TOKEN") or None,
-        timeout=float(os.getenv("RAG_HTTP_TIMEOUT", "120")),
+        timeout=_http_timeout(),
     )
     return client.search_dict(**kwargs)
 

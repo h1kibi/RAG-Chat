@@ -1,5 +1,16 @@
-from __future__ import annotations
+"""Register the shared retrieval service in an existing MCP server.
 
+NOTE: this module deliberately does **not** use ``from __future__ import
+annotations``. The MCP SDK builds a tool from a function by walking
+``inspect.signature(fn)`` and calling ``issubclass(param.annotation, Context)``
+on each parameter that has no generic origin. With postponed evaluation every
+annotation is a *string*, so that call raises
+``TypeError: issubclass() arg 1 must be a class`` and registration fails before
+the server ever starts. Don't add the future import back.
+
+``rag_service.mcp_server`` (the standalone ``ctf_rag`` entry point) is unaffected
+for the same reason: it never postponed its annotations.
+"""
 from typing import Any
 
 from rag_service.models import RetrievalRequest
@@ -23,8 +34,12 @@ def register_mcp_tool(server: Any, service: RagService, *, name: str = "search_k
         filters: dict[str, Any] | None = None,
         cursor: str | None = None,
     ) -> dict[str, Any]:
-        response = service.search(
-            RetrievalRequest(
+        from pydantic import ValidationError
+
+        from rag_service.models import describe_validation_error
+
+        try:
+            request = RetrievalRequest(
                 query=query,
                 knowledge_base=knowledge_base,
                 top_k=top_k,
@@ -33,5 +48,11 @@ def register_mcp_tool(server: Any, service: RagService, *, name: str = "search_k
                 filters=filters or {},
                 cursor=cursor,
             )
-        )
-        return response.model_dump()
+        except ValidationError as exc:
+            # Same boundary rule as ctf_rag, the OpenAI adapter, the LangChain
+            # tool and the HTTP handler: an MCP caller gets the field and the
+            # reason, not pydantic's dump with an errors.pydantic.dev URL.
+            raise ValueError(
+                f"invalid search_knowledge_base arguments: {describe_validation_error(exc)}"
+            ) from None
+        return service.search(request).model_dump()

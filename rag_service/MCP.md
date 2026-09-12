@@ -373,6 +373,22 @@ python -m rag_service.mcp_server
 
 `rag_service/mcp_adapter.py` 是给已有 MCP server 做 in-process 注册的通用适配器；它不是必须项，也不替代上面的独立 `ctf_rag` server。
 
+```python
+from mcp.server.fastmcp import FastMCP
+from rag_service import RagConfig, RagService
+from rag_service.backends.faiss import FaissBackend
+from rag_service.mcp_adapter import register_mcp_tool
+
+config = RagConfig.from_environment()
+mcp = FastMCP("my-host-app")
+register_mcp_tool(mcp, RagService(config, FaissBackend(config)), name="rag_lookup")
+mcp.run()
+```
+
+参数校验与独立 `ctf_rag` 一致：越界值返回字段级错误（如 `top_k: Input should be greater than or equal to 1`），不把 pydantic 原始 dump 交给调用方。
+
+**该模块刻意不使用 `from __future__ import annotations`**：MCP SDK 通过 `inspect.signature(fn)` 遍历参数并调用 `issubclass(param.annotation, Context)`，延迟求值会让注解变成字符串、在注册阶段直接抛 `TypeError: issubclass() arg 1 must be a class`。扩展它时不要把这个 future import 加回来（`rag_service/mcp_server.py` 同样没有它）。
+
 HTTP、CLI、LangChain、OpenAI adapter 与独立 MCP server 共用同一个 `RagService`/`FaissBackend` 契约，但 transport 和工具 schema 不同。
 
 ## 13. 自检
@@ -393,5 +409,5 @@ cd <repo>
 当前验收基线：
 
 ```text
-325 tests OK
+330 tests OK
 ```
