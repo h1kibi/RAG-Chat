@@ -9,6 +9,7 @@ Two silent failures motivated these:
    the identifier postings were perfectly readable. Callers read the failure as
    "the corpus has nothing".
 """
+import json
 import pickle
 import sqlite3
 import tempfile
@@ -136,6 +137,59 @@ class CapabilityReportingTests(unittest.TestCase):
         )
         self.assertIn("postings=unusable", rendered)
         self.assertNotIn("postings=missing", rendered)
+
+    def test_an_empty_postings_index_is_not_rejected_for_a_stale_fingerprint(self):
+        # It holds no offsets, so there is nothing to go stale: it means the
+        # corpus has no identifier tokens. Copying a KB rewrites mtime, so the
+        # fingerprint always mismatches afterwards -- reporting the fixture as
+        # broken ("postings=unusable") when it is merely empty.
+        from rag_service.backends.faiss import _open_postings
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docs = Path(temp_dir) / "docs.cos.jsonl"
+            docs.write_text('{"text":"a"}\n', encoding="utf-8")
+            (docs.parent / "docs.cos.postings").write_bytes(b"")
+            (docs.parent / "docs.cos.postings.idx.json").write_text(
+                json.dumps(
+                    {
+                        "format": "postings-v1",
+                        "tokens": 0,
+                        "postings": 0,
+                        "max_df": 500,
+                        "marks": [],
+                        # deliberately not the current file state
+                        "source": {"size": 1, "mtime_ns": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loaded = _open_postings(docs)
+
+        self.assertIsNotNone(loaded, "an empty index must load, not report a defect")
+        self.assertEqual(loaded["marks"], [])
+
+    def test_a_populated_postings_index_still_rejects_a_stale_fingerprint(self):
+        # The converse: real offsets are only safe while they match the file.
+        from rag_service.backends.faiss import _open_postings
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docs = Path(temp_dir) / "docs.cos.jsonl"
+            docs.write_text('{"text":"a"}\n', encoding="utf-8")
+            (docs.parent / "docs.cos.postings").write_bytes(b"cve-2021\t0\n")
+            (docs.parent / "docs.cos.postings.idx.json").write_text(
+                json.dumps(
+                    {
+                        "format": "postings-v1",
+                        "tokens": 1,
+                        "postings": 1,
+                        "max_df": 500,
+                        "marks": [["cve-2021", 0]],
+                        "source": {"size": 1, "mtime_ns": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertIsNone(_open_postings(docs))
 
     def test_status_reports_numpy_when_sq8_is_missing(self):
         # The degradation must be visible rather than inferred from latency.

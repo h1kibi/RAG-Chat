@@ -1554,6 +1554,15 @@ def _open_postings(docs_path: Path) -> Dict[str, Any] | None:
 
     Only the sparse marks are held in memory (a few hundred entries); rows are
     read from disk on demand, so this does not grow with corpus size.
+
+    An index that declares zero entries is returned as-is even when the document
+    fingerprint no longer matches. It holds no offsets, so there is nothing that
+    could have gone stale -- it means the corpus has no identifier tokens (no
+    CVEs, version numbers, and so on), which is normal for a small fixture. The
+    fingerprint check exists to stop stale *rows* being read, and an empty index
+    has none. Without this the same knowledge base reported
+    ``postings=unusable`` after being copied or cloned, and ``postings=ok``
+    before, because copying rewrites mtime.
     """
     postings_path = docs_path.with_name("docs.cos.postings")
     index_file = docs_path.with_name("docs.cos.postings.idx.json")
@@ -1566,10 +1575,18 @@ def _open_postings(docs_path: Path) -> Dict[str, Any] | None:
         return cached or None
     try:
         payload = json.loads(index_file.read_text(encoding="utf-8"))
-        if payload.get("format") != "postings-v1" or payload.get("source") != fingerprint:
+        if payload.get("format") != "postings-v1":
             _cache_put(_POSTINGS_CACHE, cache_key, {})
             return None
-        marks = [(str(name), int(offset)) for name, offset in payload["marks"]]
+        raw_marks = payload["marks"]
+        if not raw_marks:
+            postings = {"path": postings_path, "marks": [], "max_df": int(payload.get("max_df") or 0)}
+            _cache_put(_POSTINGS_CACHE, cache_key, postings)
+            return postings
+        if payload.get("source") != fingerprint:
+            _cache_put(_POSTINGS_CACHE, cache_key, {})
+            return None
+        marks = [(str(name), int(offset)) for name, offset in raw_marks]
     except (OSError, ValueError, KeyError, TypeError):
         _cache_put(_POSTINGS_CACHE, cache_key, {})
         return None
