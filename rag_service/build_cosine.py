@@ -76,6 +76,7 @@ def _is_current(
     artifacts: tuple[Path, Path, Path],
     index_path: Path,
     force: bool = False,
+    prebuilt: bool = False,
 ) -> bool:
     if force:
         return False
@@ -85,11 +86,18 @@ def _is_current(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    if (
-        manifest.get("format") != _ARTIFACT_FORMAT
-        or manifest.get("source")
-        != {"index.faiss": _file_state(source_index), "index.pkl": _file_state(source_pickle)}
-    ):
+    if manifest.get("format") != _ARTIFACT_FORMAT:
+        return False
+    if prebuilt:
+        # A prebuilt set is current as long as it is still marked prebuilt: the
+        # source files it was converted from are deliberately not shipped, so
+        # there is nothing to compare against.
+        if manifest.get("source") is not None:
+            return False
+    elif manifest.get("source") != {
+        "index.faiss": _file_state(source_index),
+        "index.pkl": _file_state(source_pickle),
+    }:
         return False
     # A manifest that declares quantization is only current if the quantized
     # files it promises are actually present; otherwise the backend would fall
@@ -430,7 +438,11 @@ def _ensure_sq8(
 
 
 def build_cosine_files(
-    kb_root: Path, knowledge_base: str, embedding_model: str, force: bool = False
+    kb_root: Path,
+    knowledge_base: str,
+    embedding_model: str,
+    force: bool = False,
+    prebuilt: bool = False,
 ) -> Path:
     """Build and atomically publish standalone retrieval artifacts for one KB.
 
@@ -439,6 +451,11 @@ def build_cosine_files(
     ``index.pkl``. Otherwise they are converted from the source index again:
     adopting pre-existing files by size alone would silently pair a new index
     with stale vectors.
+
+    ``prebuilt`` publishes the artifact set *without* a source fingerprint, for
+    a fixture that ships inside a Git repository. The fingerprint is
+    ``size+mtime_ns`` and Git cannot preserve mtime, so a committed manifest
+    could never validate after a clone; see ``--prebuilt`` in ``main``.
     """
     vector_name = embedding_model.replace(":", "_").replace("/", "__")
     index_path = kb_root / knowledge_base / "vector_store" / vector_name
@@ -457,7 +474,7 @@ def build_cosine_files(
     manifest_path = index_path / "vectors.cos.json"
     artifacts = (vectors_path, docs_path, offsets_path)
     if _is_current(
-        manifest_path, source_index, source_pickle, artifacts, index_path, force
+        manifest_path, source_index, source_pickle, artifacts, index_path, force, prebuilt
     ):
         print(f"{knowledge_base}/{vector_name}: standalone artifacts are already current")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -569,7 +586,9 @@ def build_cosine_files(
 
         manifest = {
             "format": _ARTIFACT_FORMAT,
-            "source": source_state,
+            # `None` marks a deliberately prebuilt set: it is self-contained and
+            # is not tied to a source index it does not ship. See `--prebuilt`.
+            "source": None if prebuilt else source_state,
             "rows": total,
             "dimension": dimension,
             "quantization": _QUANTIZATION_INT8,
@@ -624,6 +643,15 @@ def main() -> None:
         help="regenerate even when the manifest says the artifacts are current "
         "(needed after the artifact set itself changes, e.g. enabling quantization)",
     )
+    parser.add_argument(
+        "--prebuilt",
+        action="store_true",
+        help="publish the artifacts without a source-index fingerprint, for a "
+        "fixture committed to a repository. The fingerprint records mtime, which "
+        "Git cannot preserve, so a committed manifest could never validate after "
+        "a clone; a set published this way is self-contained and must not be "
+        "shipped alongside index.faiss/index.pkl",
+    )
     args = parser.parse_args()
 
     kb_root = Path(args.kb_root)
@@ -644,7 +672,7 @@ def main() -> None:
         if not model:
             print(f"{kb_name}: no embedding model recorded, skipping")
             continue
-        build_cosine_files(kb_root, kb_name, model, force=args.force)
+        build_cosine_files(kb_root, kb_name, model, force=args.force, prebuilt=args.prebuilt)
 
 
 if __name__ == "__main__":

@@ -586,7 +586,7 @@ class FaissBackend(RetrievalBackend):
         docs_path = index_path / "docs.cos.jsonl"
         offsets_path = index_path / "docs.cos.offsets.u64"
         manifest_path = index_path / "vectors.cos.json"
-        for required in (docs_path, offsets_path, manifest_path, index_path / "index.faiss"):
+        for required in (docs_path, offsets_path, manifest_path):
             if not required.is_file():
                 raise RagIndexNotReadyError(
                     f"knowledge base '{knowledge_base}' is missing standalone cosine files; "
@@ -808,19 +808,24 @@ class FaissBackend(RetrievalBackend):
         offsets_path = index_path / "docs.cos.offsets.u64"
         manifest_path = index_path / "vectors.cos.json"
 
-        if not source_index.is_file() or source_index.stat().st_size <= 45:
-            raise RagIndexNotReadyError(
-                f"knowledge base '{knowledge_base}' has no source FAISS index"
-            )
-        if not source_pickle.is_file() or source_pickle.stat().st_size == 0:
-            raise RagIndexNotReadyError(
-                f"knowledge base '{knowledge_base}' has no source FAISS metadata"
-            )
         if not all(path.is_file() for path in (vectors_path, docs_path, offsets_path, manifest_path)):
             raise RagIndexNotReadyError(
                 f"knowledge base '{knowledge_base}' is missing standalone cosine files; "
                 "run `python -m rag_service.build_cosine --kb-root <kb_root>`"
             )
+        # The source pair is only needed to *derive* the artifacts, and to prove
+        # they are still current. A set published with `--prebuilt` ships
+        # without it (Git cannot preserve the mtime the fingerprint records), so
+        # require the files only when the manifest actually references them.
+        if not _is_prebuilt_manifest(manifest_path):
+            if not source_index.is_file() or source_index.stat().st_size <= 45:
+                raise RagIndexNotReadyError(
+                    f"knowledge base '{knowledge_base}' has no source FAISS index"
+                )
+            if not source_pickle.is_file() or source_pickle.stat().st_size == 0:
+                raise RagIndexNotReadyError(
+                    f"knowledge base '{knowledge_base}' has no source FAISS metadata"
+                )
 
         try:
             manifest = _read_current_manifest(manifest_path, source_index, source_pickle)
@@ -1324,20 +1329,45 @@ class FaissBackend(RetrievalBackend):
             )
 
 
+def _is_prebuilt_manifest(manifest_path: Path) -> bool:
+    """True when the manifest declares a self-contained, source-less artifact set.
+
+    Read leniently: an unreadable or malformed manifest returns False so the
+    caller keeps its existing, stricter error path.
+    """
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return manifest.get("source") is None and "source" in manifest
+
+
 def _read_current_manifest(
     manifest_path: Path,
     source_index: Path,
     source_pickle: Path,
 ) -> Dict[str, Any]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("format") != _ARTIFACT_FORMAT:
+        raise ValueError(f"unsupported artifact format: {manifest.get('format')!r}")
+    if not isinstance(manifest.get("artifacts"), dict):
+        raise ValueError("manifest artifacts are missing")
+    if manifest.get("source") is None:
+        # Published with `build_cosine --prebuilt`: the set is self-contained and
+        # was never tied to a source index it ships. There is consequently
+        # nothing for it to be stale against.
+        #
+        # If a source index is present anyway, someone put one there on purpose;
+        # refuse rather than serve artifacts of unknown provenance against it.
+        if source_index.is_file() or source_pickle.is_file():
+            raise ValueError("a source index is present but the artifacts are prebuilt")
+        return manifest
     expected_source = {
         "index.faiss": _file_state(source_index),
         "index.pkl": _file_state(source_pickle),
     }
-    if manifest.get("format") != _ARTIFACT_FORMAT or manifest.get("source") != expected_source:
+    if manifest.get("source") != expected_source:
         raise ValueError("manifest source does not match current files")
-    if not isinstance(manifest.get("artifacts"), dict):
-        raise ValueError("manifest artifacts are missing")
     return manifest
 
 

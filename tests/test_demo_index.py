@@ -8,6 +8,7 @@ build their own stores in temp directories.
 These assertions deliberately avoid the embedding provider (browse mode and
 `status()` need no vectors for a query), so the suite keeps running offline.
 """
+import json
 import unittest
 from pathlib import Path
 
@@ -20,8 +21,6 @@ DEMO_ROOT = Path(__file__).resolve().parent.parent / "examples" / "demo-kb"
 INDEX_DIR = DEMO_ROOT / "cybersec" / "vector_store" / "bge-m3"
 
 REQUIRED_FILES = (
-    "index.faiss",
-    "index.pkl",
     "vectors.cos.f32",
     "vectors.cos.sq8",
     "vectors.cos.int8",
@@ -31,6 +30,12 @@ REQUIRED_FILES = (
     "docs.cos.offsets.u64",
     "docs.cos.ranges.json",
 )
+
+SOURCE_FILES = ("index.faiss", "index.pkl")
+"""Deliberately not shipped: the manifest records a source fingerprint of
+``size+mtime_ns``, and Git cannot preserve mtime, so a committed set that still
+referenced a source index could never validate after a clone. The set is
+published with ``build_cosine --prebuilt`` instead."""
 
 
 def _config() -> RagConfig:
@@ -51,6 +56,21 @@ class DemoIndexTests(unittest.TestCase):
             self.assertTrue(path.is_file(), f"missing demo artifact: {path}")
             self.assertGreater(path.stat().st_size, 0, f"empty demo artifact: {path}")
         self.assertTrue((DEMO_ROOT / "info.db").is_file())
+
+    def test_the_demo_index_ships_without_its_source_index(self):
+        # Shipping the source pair would make the fixture fail on every fresh
+        # clone: the manifest's mtime fingerprint cannot survive a checkout.
+        for name in SOURCE_FILES:
+            self.assertFalse(
+                (INDEX_DIR / name).exists(),
+                f"{name} must not be committed; regenerate with "
+                "scripts/build-demo-index.py (it publishes --prebuilt)",
+            )
+        manifest = json.loads((INDEX_DIR / "vectors.cos.json").read_text(encoding="utf-8"))
+        self.assertIsNone(
+            manifest.get("source"),
+            "a committed artifact set must declare itself prebuilt",
+        )
 
     def test_the_demo_index_is_not_reported_as_stale(self):
         # `status()` runs the same manifest fingerprint handshake a query does;

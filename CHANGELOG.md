@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+### Fixed — 演示索引在真实克隆上不可用（第九轮续）
+
+上一版把演示索引连同 `index.faiss` / `index.pkl` 一起提交，从 GitHub 克隆后**它自己就是坏的**：
+
+```
+clone → 安装 → pytest
+  FAILED test_the_demo_index_is_not_reported_as_stale
+  {'dense_path': 'unavailable', 'error': 'RagIndexNotReadyError'}
+```
+
+根因不是换行符（文件字节数逐一比对完全一致），而是 **manifest 的源指纹记录 `size + mtime_ns`**。
+`git clone` 必然重写 mtime，所以**任何提交进仓库的索引都不可能通过校验**——这是设计层面的
+事实，不是配置问题。上一轮我只在本地验证了演示索引，没做真克隆，所以漏掉了。
+
+修法是让产物集显式声明自己的形态，而不是放宽校验：
+
+- `build_cosine --prebuilt`：发布转换产物时把 manifest 的 `source` 记为 `null`，表示
+  「这份产物集自包含，不绑定它不携带的源索引」。
+- 读取侧据此直接加载 sidecar；**普通知识库完全不受影响**——只要 `source` 非空就仍然执行
+  严格的 `size+mtime` 比对（`test_faiss_backend_rejects_stale_cosine_files` 继续通过）。
+- 反过来也守住：manifest 声明 prebuilt 却出现了 `index.faiss`/`index.pkl` 时**拒绝加载**，
+  避免拿来源不明的产物去服务。四种组合均已实测（缺失→加载；源索引/源 pickle/两者出现→拒绝）。
+- `scripts/build-demo-index.py` 改为一步产出可提交状态（转换 + prebuilt + 删除源索引对），
+  演示产物从 147 KB 降到 93 KB，且不再携带 LangChain pickle。
+
+`tests/test_demo_index.py` 增加用例，断言产物集**不得**包含源索引、且 manifest 必须声明
+`source: null`，防止有人「顺手」把它加回去。
+
+测试 334 → 335。
+
 ### Added — 演示索引（让克隆后 RAG 立即可用）
 
 之前克隆下来的仓库**无法直接做检索**：`rag_service` 只读，`build_cosine` 只转换，两者都需要
@@ -168,7 +198,7 @@ base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以�
 测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
 补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
 
-九轮累计：280 → 334 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
+九轮累计：280 → 335 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
 
 ### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
 

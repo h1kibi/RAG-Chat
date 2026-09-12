@@ -150,6 +150,28 @@ def write_store(output_root: Path, documents: list[dict], embedding_model: str) 
     return index_path
 
 
+def publish(output_root: Path, embedding_model: str) -> None:
+    """Convert the store and publish it in the shippable, source-less form.
+
+    The source pair is deliberately removed afterwards. Everything the service
+    reads comes from the converted artifacts, and the manifest's source
+    fingerprint records mtime -- which Git cannot preserve, so a committed set
+    that still referenced a source index could never validate after a clone.
+    ``--prebuilt`` records that decision in the manifest.
+    """
+    from rag_service.build_cosine import build_cosine_files
+
+    vectors_path = build_cosine_files(
+        output_root, KNOWLEDGE_BASE, embedding_model, force=True, prebuilt=True
+    )
+    # `build_cosine_files` returns the vectors file, not the directory.
+    for name in ("index.faiss", "index.pkl"):
+        path = vectors_path.parent / name
+        if path.is_file():
+            path.unlink()
+            print(f"  removed source artifact {name} (prebuilt set)")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--template-root", type=Path, default=DEFAULT_TEMPLATE)
@@ -160,9 +182,7 @@ def main() -> int:
     documents = build_documents(args.template_root)
     print(f"chunked {len(documents)} rows from {args.template_root}")
     write_store(args.output, documents, args.embedding_model)
-    print("\nnow convert it for the retrieval service:")
-    print(f"  python -m rag_service.build_cosine --kb-root {args.output} "
-          f"--knowledge-base {KNOWLEDGE_BASE}")
+    publish(args.output, args.embedding_model)
     print(json.dumps({"rows": len(documents), "output": str(args.output)}, ensure_ascii=False))
     return 0
 

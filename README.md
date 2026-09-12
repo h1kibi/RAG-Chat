@@ -15,9 +15,9 @@
 ├── agent_service/      Agent 模块 —— 本地 Web 对话
 │                       离线 Ollama，或填 API Key 走云端
 ├── knowledge-base/     知识库模板（Git 内，8 篇示例文档）
-├── examples/demo-kb/   演示索引（147 KB），开箱即可查询
+├── examples/demo-kb/   演示索引（93 KB），开箱即可查询
 ├── scripts/            建库与导入脚本
-└── tests/              334 个测试
+└── tests/              335 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -74,12 +74,13 @@ $env:RAG_DEFAULT_SCORE_THRESHOLD = '0.35'   # 见下方说明
 .\.venv\Scripts\python.exe -m rag_service search "授权渗透测试开始前要确认什么" --top-k 2
 ```
 
-`examples/demo-kb`（147 KB，11 行）由上面 8 篇模板文档生成，用来验证安装是否完整。它由 `scripts/build-demo-index.py` 生成，用真实语料时不要照搬：
+`examples/demo-kb`（93 KB，11 行）由上面 8 篇模板文档生成，用来验证安装是否完整。它由 `scripts/build-demo-index.py` 一步重建（需要 Ollama 与 `bge-m3`）：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/build-demo-index.py
-.\.venv\Scripts\python.exe -m rag_service.build_cosine --kb-root examples\demo-kb --knowledge-base cybersec
 ```
+
+它是 `build_cosine --prebuilt` 发布的产物：**只含转换后的 sidecar，不含 `index.faiss` / `index.pkl`**。原因是 manifest 的源指纹记录 `size + mtime_ns`，而 **Git 无法保留 mtime**——提交进仓库的索引在任何一次 `git clone` 后都会被判为过期（实测：克隆后 `dense_path=unavailable`，检索直接不可用）。`--prebuilt` 让产物集显式声明「没有源索引」，服务据此直接读取自包含的 sidecar；**普通知识库不受影响**，源索引一旦存在仍走严格的 `size+mtime` 校验（已覆盖测试）。用真实语料时不要照搬这个脚本的切块规则。
 
 > **演示索引要把 `RAG_DEFAULT_SCORE_THRESHOLD` 降到 `0.35`。** 默认 `0.45` 是按百万行语料标定的：小语料里几乎每个词都"稀有"，词法项贡献接近 0，融合分基本等于 `0.65 × 余弦`，于是 11 行里 6 条正常提问会掉到 0.45 以下而返回 `no_match`。降到 0.35 后 6/6 命中正确文档，域外提问（如"今天晚饭吃什么"）仍然返回空。阈值是**按语料标定**的，换语料就该重跑 `rag_service.evaluate` / `scripts/rag_threshold_band.py`。
 
@@ -336,7 +337,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 334 passed
+# 335 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。
@@ -356,7 +357,7 @@ $env:ZAI_API_KEY = '...'
 ## 已知限制
 
 - **Python 3.12 only**，Windows 为主；`faiss-cpu==1.9.0` 没有 3.13 轮子。
-- **索引构建不在本仓库**：需要上游 `LangGraph-Chatchat` 之类的工具产出 `index.faiss` + `index.pkl`，本项目负责转换与检索。仓库内只有 `examples/demo-kb`（147 KB，由 8 篇模板文档生成）用于验证安装；真实语料必须自己构建，`scripts/build-demo-index.py` 的简单切块规则**不适合**大语料。
+- **索引构建不在本仓库**：需要上游 `LangGraph-Chatchat` 之类的工具产出 `index.faiss` + `index.pkl`，本项目负责转换与检索。仓库内只有 `examples/demo-kb`（93 KB，由 8 篇模板文档生成、以 `--prebuilt` 发布）用于验证安装；真实语料必须自己构建，`scripts/build-demo-index.py` 的简单切块规则**不适合**大语料。
 - **检索质量取决于语料**：`score_threshold` 默认 0.45 是按百万行语料标定的。换语料必须重新标定（`rag_service.evaluate` / `scripts/rag_threshold_band.py`），小语料往往需要更低门限。
 - **单用户、单机**：没有权限体系、没有并发调度，不是服务端方案。
 - **扫描版 PDF 未处理**：需要单独的 OCR 流程。
