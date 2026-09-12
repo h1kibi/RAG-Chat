@@ -96,8 +96,7 @@ class RagConfig:
         return self.knowledge_base_root / "info.db"
 
     def vector_store_path(self, knowledge_base: str, embedding_model: str) -> Path:
-        if not self.is_allowed_knowledge_base(knowledge_base):
-            raise ValueError(f"knowledge base is not allowed: {self._explain_disallowed(knowledge_base)}")
+        self.require_allowed(knowledge_base)
         if not embedding_model or Path(embedding_model).name != embedding_model:
             raise ValueError("embedding_model must be a simple model name")
         vector_name = embedding_model.replace(":", "_").replace("/", "__")
@@ -125,6 +124,11 @@ class RagConfig:
             raise ValueError("document_cache_limit must be at least 64")
         if self.embedding_failure_ttl < 0 or self.embedding_failure_ttl > 3600:
             raise ValueError("embedding_failure_ttl must be within 0..3600")
+        # RetrievalRequest.query caps at 8000, so a larger configured value can
+        # never be honoured and a value below 1 rejects every query. Bound it
+        # here rather than letting the knob read as adjustable.
+        if not 1 <= self.max_query_length <= 8_000:
+            raise ValueError("max_query_length must be within 1..8000")
         if self.store_cache_limit < 1 or self.store_cache_limit > 32:
             raise ValueError("store_cache_limit must be within 1..32")
         if not 0 <= self.lexical_weight <= 1:
@@ -145,7 +149,17 @@ class RagConfig:
             return False
         return not self.allowed_knowledge_bases or name in self.allowed_knowledge_bases
 
-    def _explain_disallowed(self, name: str) -> str:
+    def require_allowed(self, name: str) -> None:
+        """Raise unless ``name`` is a usable, allowed knowledge base.
+
+        Single place where the check and its explanation live, so every caller
+        (path building, request normalisation, health probes) reports the same
+        actionable reason instead of just the fact of rejection.
+        """
+        if not self.is_allowed_knowledge_base(name):
+            raise ValueError(f"knowledge base is not allowed: {self.explain_disallowed(name)}")
+
+    def explain_disallowed(self, name: str) -> str:
         """Say which variable rejected the name, not just that it was rejected.
 
         The agent and the retrieval service are configured by different variables

@@ -4,6 +4,15 @@ Every knob is environment driven so an air-gapped host can be configured without
 editing files. The defaults already describe the offline case: a local Ollama
 with ``qwen2.5:7b`` and the local RAG index, no network required. A cloud
 provider only appears once ``AGENT_CLOUD_BASE_URL`` and a key are supplied.
+
+Chat and retrieval are configured separately, and pointing one at a remote host
+does not move the other:
+
+- chat model:  ``AGENT_OLLAMA_BASE_URL`` (or the cloud provider's variables)
+- embeddings:  ``RAG_OLLAMA_BASE_URL`` -- the embedding provider belongs to
+  ``rag_service``, because the index was built with it
+- the knowledge base to search: ``AGENT_RAG_KNOWLEDGE_BASE``, which retrieval
+  must also allow (``RAG_ALLOWED_KNOWLEDGE_BASES``)
 """
 from __future__ import annotations
 
@@ -114,8 +123,6 @@ class AgentConfig:
     rag_score_threshold: Optional[float] = None
     rag_evidence_chars: int = 4_000
     """Total characters of retrieved evidence placed in the prompt."""
-
-    ollama_base_url: str = "http://127.0.0.1:11434"
 
     def __post_init__(self) -> None:
         if not self.host.strip():
@@ -256,7 +263,6 @@ class AgentConfig:
                 else _env_float("AGENT_RAG_SCORE_THRESHOLD", 0.45)
             ),
             rag_evidence_chars=_env_int("AGENT_RAG_EVIDENCE_CHARS", 4_000),
-            ollama_base_url=os.getenv("AGENT_OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
         )
 
 

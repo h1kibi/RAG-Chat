@@ -58,6 +58,13 @@ async def _run_check(config: AgentConfig) -> int:
     else:
         print(f"[OK  ] RAG 知识库 {rag.get('knowledge_base')}: {rag.get('status')}")
         rag_ok = True
+        # Embeddings are a separate provider from the chat model; a dead one
+        # leaves every query on the lexical fallback while the index looks fine.
+        embedding = str(rag.get("embedding") or "")
+        if embedding.startswith("ready"):
+            print(f"[OK  ] RAG embedding: {embedding}")
+        elif embedding:
+            print(f"[WARN] RAG embedding: {embedding} -> 查询会降级为纯词法检索（分数不是余弦相似度）")
 
     if healthy == 0:
         print(

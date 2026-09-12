@@ -4,9 +4,51 @@
 
 ## [Unreleased]
 
-### Fixed — 首轮质检（pre-release）
+### Fixed — 第四轮质检（对抗性 + 全流程复检）
 
-从「克隆下来能不能用」的角度复检，修复以下问题：
+**健康检查是本轮重灾区**（上一轮我自己刚改过的代码）：
+
+- `_rag_status` 拿**默认**知识库去探测，却用 Agent **配置**的知识库名标注结果。于是
+  `AGENT_RAG_KNOWLEDGE_BASE=samples`、allow-list 只放行 `cybersec` 时，`--check` 打印
+  `[OK] 知识库 samples: rows=1016721`（那是 cybersec 的行数）并以 0 退出，而每一轮问答
+  其实都在静默降级。现在探测的就是运行时真正会用的那个知识库。
+- **完全不存在索引也被报成 OK**：`backend.status()` 把失败包成值
+  （`dense_path="unavailable"`）而不抛异常，`describe_status()` 又丢掉 `error` 字段，于是
+  「没有任何索引」变成绿色的就绪信号、`--check` 退出 0 —— 上一轮刚加的退出码契约形同虚设。
+  现在把这种结果当失败处理，且**失败结果不缓存**。
+- 缓存是模块级单例、不区分配置：同一进程里第二个 `create_app`（或改环境变量后重新构造
+  config）会读到另一个部署的知识库与状态。现在按部署（知识库/根目录/模型/远端 URL）分键。
+- 配置了 `RAG_SERVICE_URL`（索引故意放在别的进程）时，健康检查仍去开本地索引，于是
+  `--check` 报「RAG 不可用」退出 1，而 HTTP 检索其实完全正常。现在改为探远端 `/v1/rag/health`。
+- 健康检查不看 embedding 提供方：`RAG_OLLAMA_BASE_URL` 指向死端口时页面仍是绿色的
+  「检索就绪」，而每次查询都返回 `degraded=lexical-only`。现在健康检查包含 embedding 预检。
+
+**并发与资源生命周期**：
+
+- `_release_store` 显式 `memmap._mmap.close()` 并在并发读时把数组置 None。实测：带活视图关闭
+  映射**会成功**，随后读取是**访问违例（进程直接死，退出码 5）**，不是可捕获的异常。上一次
+  审计把它评为「不可达的 P3」，但 `store_cache_limit` 淘汰路径同样会触发它。改为**读者租约**：
+  读路径先登记，释放时若有在飞读者则推迟；空闲时仍然立即解映射（保留原有语义与测试）。
+  真实索引下 6 线程检索中途 close，0 错误。
+- 文档缓存的淘汰循环用裸 `del`，两个并发读者可能选中同一批 key 而抛 `KeyError`（逃逸成 500）。
+  改为 `pop(key, None)`（`_cache_put` 早就这么做了）。
+- `RAG_MAX_QUERY_LENGTH` 未校验：`0` 让每个查询都报错，`>8000` 无法兑现（请求模型硬上限 8000）。
+  现在限定 `1..8000`。
+
+**知识库门禁**：`AGENT_RAG_KNOWLEDGE_BASE` 与 `RAG_ALLOWED_KNOWLEDGE_BASES` 不一致时，报错只说
+「knowledge base is not allowed: cybersec」，不说是哪个变量、允许什么。现在统一走
+`RagConfig.require_allowed()` 单一入口，报出变量名与可用值。
+
+**清掉一个死字段**：`AgentConfig.ollama_base_url` 构造后从未被读取（对话用的是 provider 的
+base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以为它能配置 embedding。
+删除，并在模块文档里写清「对话模型」与「检索 embedding」是两套配置。
+
+测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
+补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
+
+### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
+
+按「克隆下来能不能用 → 检索状态对不对 → 界面会不会卡死」的顺序逐轮复检：
 
 - **`.gitignore` 吞掉了测试夹具**（发布阻断）：裸 `data/` 在 git 中匹配任意深度，导致
   `tests/data/retrieval_queries.jsonl` 从未入库。新克隆上 `test_evaluate_labels.py` 直接

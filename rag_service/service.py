@@ -187,9 +187,5 @@ class RagService:
             values["score_threshold"] = self.config.default_score_threshold
         if len(values["query"]) > self.config.max_query_length:
             raise ValueError("query exceeds configured maximum length")
-        if not self.config.is_allowed_knowledge_base(values["knowledge_base"]):
-            raise ValueError(
-                "knowledge base is not allowed: "
-                f"{self.config._explain_disallowed(values['knowledge_base'])}"
-            )
+        self.config.require_allowed(values["knowledge_base"])
         return RetrievalRequest.model_validate(values)

@@ -147,8 +147,14 @@ async function refreshStatus() {
     const rag = health.rag || {};
     const parts = [`模型 ${ready.length}/${health.providers.length}`];
     parts.push(rag.enabled === false ? "检索未启用" : (rag.error ? "检索不可用" : "检索就绪"));
+    const embedding = String(rag.embedding || "");
+    const embeddingDown = embedding && !embedding.startsWith("ready");
+    if (embeddingDown) parts.push("embedding 不可用");
     chip.textContent = parts.join(" · ");
-    chip.className = "chip " + (ready.length ? (rag.error ? "bad" : "ok") : "bad");
+    chip.className = "chip " + (ready.length ? (rag.error || embeddingDown ? "bad" : "ok") : "bad");
+    if (embeddingDown) {
+      chip.title = `embedding provider: ${embedding} —— 查询会降级为纯词法检索，结果分数不是余弦相似度`;
+    }
     const offline = health.providers.filter((p) => p.ok && p.offline).map((p) => p.id);
     if (!offline.length) chip.textContent += "（无离线模型可用）";
   } catch (err) {

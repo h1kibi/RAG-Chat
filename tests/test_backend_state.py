@@ -17,6 +17,7 @@ refused -- stale evidence in the mode used to verify citations.
 import pickle
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -216,6 +217,97 @@ class SidecarFreshnessTests(unittest.TestCase):
                 )
             finally:
                 service.backend.close()
+
+
+class StoreLifetimeTests(unittest.TestCase):
+    """A release must never unmap a store a search is still reading.
+
+    The store is shared across threads (asyncio.to_thread, FastAPI's threadpool,
+    the MCP server). `_release_store` closes the underlying memmap, which unmaps
+    the file even while another thread is scanning it -- an access violation, not
+    a catchable exception. Read paths therefore take a lease, and release is
+    deferred while any lease is held.
+    """
+
+    def _backend(self, root: Path) -> FaissBackend:
+        return FaissBackend(_config(root))
+
+    def test_release_is_deferred_while_a_reader_holds_the_store(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _build_index(root)
+            build_cosine_files(root, "cybersec", "bge-m3")
+            backend = self._backend(root)
+            try:
+                with backend._reader_lease():
+                    store = backend._load_store("cybersec", "bge-m3")
+                    expected = store["vectors"].shape[0]
+                    backend.close()
+                    # Still mapped: the reader can finish its scan.
+                    self.assertIsNotNone(
+                        store["vectors"],
+                        "close() unmapped a store a reader is still scanning",
+                    )
+                    self.assertEqual(store["vectors"].shape[0], expected)
+                    self.assertEqual(int(store["vectors"][0][0]), 1)
+                del store
+            finally:
+                backend.close()
+
+    def test_an_idle_release_still_unmaps(self):
+        # The guard must not defeat the documented behaviour: with no reader
+        # active, close() releases the mapping (so the index can be rebuilt).
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _build_index(root)
+            build_cosine_files(root, "cybersec", "bge-m3")
+            backend = self._backend(root)
+            store = backend._load_store("cybersec", "bge-m3")
+            backend.close()
+            self.assertIsNone(store["vectors"])
+            del store
+
+    def test_concurrent_searches_survive_a_mid_flight_close(self):
+        # The reported failure mode: a release landing while other threads are
+        # scanning raised AttributeError out of search().
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _build_index(root)
+            build_cosine_files(root, "cybersec", "bge-m3")
+            service = RagService(_config(root), self._backend(root))
+
+            request = RetrievalRequest(
+                query="", knowledge_base="cybersec", filters={"category": "01_web"}
+            )
+            failures: list[str] = []
+            barrier = threading.Barrier(5)
+
+            def worker():
+                try:
+                    barrier.wait(timeout=10)
+                    for _ in range(8):
+                        results = service.search(request)
+                        if not results:
+                            failures.append("empty result")
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"{type(exc).__name__}: {exc}")
+
+            threads = [threading.Thread(target=worker) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            try:
+                barrier.wait(timeout=10)
+                # Release repeatedly while the readers are mid-scan.
+                for _ in range(4):
+                    service.backend.close()
+            finally:
+                for thread in threads:
+                    thread.join(timeout=30)
+
+            self.assertEqual(failures, [], "a concurrent release broke an in-flight search")
+            service.backend.close()
+            del service
+
 
 
 if __name__ == "__main__":

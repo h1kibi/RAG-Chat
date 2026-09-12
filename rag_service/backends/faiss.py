@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import bisect
+import contextlib
 import json
 import re
 import sqlite3
@@ -153,6 +154,9 @@ class FaissBackend(RetrievalBackend):
         # the provider failed. Thread-local state keeps concurrent agent calls
         # from overwriting each other's degraded marker.
         self._search_state = threading.local()
+        # In-flight readers, so a release never unmaps a store under one.
+        self._readers = 0
+        self._readers_lock = threading.Lock()
 
     def search_state(self) -> Dict[str, Any]:
         """Return per-call operational state for the service facade."""
@@ -162,6 +166,23 @@ class FaissBackend(RetrievalBackend):
 
     def _reset_search_state(self) -> None:
         self._search_state.degraded = None
+
+    @contextlib.contextmanager
+    def _reader_lease(self):
+        """Pin stores against release for the duration of a read.
+
+        The count is taken *before* the store is loaded, so a concurrent eviction
+        or close() cannot unmap a store this reader is about to use. Release
+        reads the count without a lock: the count only ever prevents an unmap,
+        so a stale read is the safe direction.
+        """
+        with self._readers_lock:
+            self._readers += 1
+        try:
+            yield
+        finally:
+            with self._readers_lock:
+                self._readers -= 1
 
     def close(self) -> None:
         """Release open memory maps, provider clients, and cached stores."""
@@ -186,6 +207,10 @@ class FaissBackend(RetrievalBackend):
         self.close()
 
     def search(self, request: RetrievalRequest) -> List[SearchResult]:
+        with self._reader_lease():
+            return self._search_leased(request)
+
+    def _search_leased(self, request: RetrievalRequest) -> List[SearchResult]:
         # The degraded marker is per call, not per thread. Without this reset it
         # sticks for the life of the worker thread, so every query after a
         # transient provider outage is labelled lexical-only even once the dense
@@ -788,10 +813,18 @@ class FaissBackend(RetrievalBackend):
             self._stores[cache_key] = store
             return store
 
-    @staticmethod
-    def _release_store(store: Dict[str, Any] | None) -> None:
-        """Drop a store's native resources (memmaps, faiss index)."""
+    def _release_store(self, store: Dict[str, Any] | None) -> None:
+        """Drop a store's native resources (memmaps, faiss index).
+
+        Skipped while a search is in flight: closing the mapping unmaps the file
+        under a reader that is still scanning it, which is an access violation
+        (process death), not a catchable exception. The reader's own reference
+        finalises the mapping when it finishes. Readers take a lease before they
+        load a store, so a reader either sees a live store or loads a fresh one.
+        """
         if not store:
+            return
+        if self._readers > 0:
             return
         targets = [store.get("vectors")]
         quantized = store.get("quantized")
@@ -860,6 +893,10 @@ class FaissBackend(RetrievalBackend):
         }
 
     def status(self, knowledge_base: str | None = None) -> Dict[str, Any]:
+        with self._reader_lease():
+            return self._status_leased(knowledge_base)
+
+    def _status_leased(self, knowledge_base: str | None = None) -> Dict[str, Any]:
         """Report runtime capabilities so callers can see degraded operation.
 
         Exposed through health: a service silently running the numpy scan (no
@@ -888,6 +925,11 @@ class FaissBackend(RetrievalBackend):
         documents). Returns an empty set when the index is unavailable, so a
         caller can skip validation rather than fail a query over it.
         """
+        with self._reader_lease():
+            return self._known_sources_leased(knowledge_base)
+
+    def _known_sources_leased(self, knowledge_base: str) -> set:
+        """Body of :meth:`known_sources`, under a reader lease."""
         try:
             embedding_model = self._resolve_embedding_model(knowledge_base)
             store = self._load_store(knowledge_base, embedding_model)

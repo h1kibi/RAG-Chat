@@ -16,7 +16,7 @@
 │                       离线 Ollama，或填 API Key 走云端
 ├── knowledge-base/     知识库模板（Git 内）
 ├── scripts/            建库与导入脚本
-└── tests/              305 个测试
+└── tests/              311 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -227,6 +227,16 @@ $env:ZAI_API_KEY = '...'
 | `AGENT_RAG_EVIDENCE_CHARS` | `4000` | 放入 prompt 的证据字符上限 |
 
 `RAG_KB_ROOT` 仍需设置，否则检索不可用（Agent 会警告并降级为纯对话，不会报错退出）。
+
+**问答模型和检索 embedding 是两套配置**，把其中一个指向远端不会带动另一个：
+
+| 用途 | 变量 | 归谁管 |
+|---|---|---|
+| 对话模型 | `AGENT_OLLAMA_BASE_URL` | Agent |
+| 检索 embedding | `RAG_OLLAMA_BASE_URL` | RAG（索引是用它建的） |
+| 检索哪个知识库 | `AGENT_RAG_KNOWLEDGE_BASE` | Agent 选择，RAG 用 `RAG_ALLOWED_KNOWLEDGE_BASES` 放行 |
+
+知识库名不在 allow-list 时，健康检查和对话都会明确告诉你该改哪个变量。
 
 ### HTTP 接口
 
