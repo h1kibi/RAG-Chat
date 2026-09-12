@@ -15,3 +15,9 @@
 *.u64   -text -diff
 *.faiss -text -diff
 *.pkl   -text -diff
+
+# Vendored browser libraries are generated artifacts: store them byte-for-byte so
+# they can be verified against the upstream release named in
+# agent_service/static/vendor/README.md. CRLF was measured harmless for these two
+# files, so this is about integrity, not breakage.
+agent_service/static/vendor/*.js -text -diff
