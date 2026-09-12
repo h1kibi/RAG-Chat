@@ -16,7 +16,7 @@
 │                       离线 Ollama，或填 API Key 走云端
 ├── knowledge-base/     知识库模板（Git 内）
 ├── scripts/            建库与导入脚本
-└── tests/              318 个测试
+└── tests/              324 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -181,7 +181,29 @@ from rag_service.adapters import create_openai_tool_schema, dispatch_openai_tool
 
 ### 主要环境变量
 
-`RAG_KB_ROOT`（必填）、`RAG_ALLOWED_KNOWLEDGE_BASES`、`RAG_DEFAULT_KNOWLEDGE_BASE`、`RAG_EMBEDDING_MODEL`、`RAG_OLLAMA_BASE_URL`、`RAG_DEFAULT_SCORE_THRESHOLD`、`RAG_LEXICAL_WEIGHT`、`RAG_LEXICAL_FALLBACK`、`RAG_SNIPPET_CHARS`、`RAG_API_TOKEN`、`RAG_SERVICE_URL`、`RAG_HTTP_TIMEOUT`。完整列表见 `rag_service/config.py`。
+`RAG_KB_ROOT`（必填）、`RAG_ALLOWED_KNOWLEDGE_BASES`、`RAG_DEFAULT_KNOWLEDGE_BASE`、`RAG_EMBEDDING_MODEL`、`RAG_OLLAMA_BASE_URL`、`RAG_DEFAULT_SCORE_THRESHOLD`、`RAG_LEXICAL_WEIGHT`、`RAG_LEXICAL_FALLBACK`、`RAG_SNIPPET_CHARS`、`RAG_API_TOKEN`、`RAG_SERVICE_URL`、`RAG_HTTP_TIMEOUT`。
+
+其余可直接调整的旋钮（默认值即实测最优，改动前请先跑评测）：
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `RAG_HOST` / `RAG_PORT` | `127.0.0.1` / `8791` | HTTP 服务监听；`--host` / `--port` 覆盖 |
+| `RAG_DEFAULT_TOP_K` | `5` | 未传 `top_k` 时的条数 |
+| `RAG_MAX_TOP_K` | `50` | `top_k` / `limit` 的上限 |
+| `RAG_MAX_QUERY_LENGTH` | `8000` | 查询字符上限（1..8000） |
+| `RAG_MAX_CONTENT_CHARS` | `8000` | 单条结果正文硬上限 |
+| `RAG_CANDIDATE_POOL` | `600` | 无过滤查询的重排候选池 |
+| `RAG_FILTERED_CANDIDATE_LIMIT` | `1200` | 带过滤查询的候选池 |
+| `RAG_PATH_RECALL_LIMIT` / `RAG_PATH_RECALL_ROWS_PER_PATH` | `400` / `2` | 路径命中的强制召回上限 |
+| `RAG_IDENTIFIER_RECALL_LIMIT` | `40` | 每个标识符 token 的 postings 召回行数（`0` 关闭） |
+| `RAG_STORE_CACHE_LIMIT` / `RAG_DOCUMENT_CACHE_LIMIT` | `3` / `2048` | 常驻索引代数 / 文档行缓存 |
+| `RAG_EMBEDDING_FAILURE_TTL` | `30` | embedding 失败的记忆秒数 |
+| `RAG_LOW_SCORE_WARN` | `0.55` | 低分警告阈值（`0` 关闭） |
+| `RAG_LOW_INFO_FILTER` | `1` | 低信息 chunk 过滤 |
+| `RAG_MERGE_NEIGHBOR_LIMIT` | `2` | 相邻 chunk 合并的每侧上限 |
+| `RAG_FILTER_FLAG_ATTACHMENTS` / `RAG_STRIP_IMAGES` / `RAG_STRIP_PROVENANCE` | `1` | 附件、图片语法、provenance 头处理 |
+
+完整列表（含取值范围校验）见 `rag_service/config.py`。
 
 ---
 
@@ -226,6 +248,8 @@ $env:ZAI_API_KEY = '...'
 | `AGENT_RAG_SCORE_THRESHOLD` | 空 | 空则用 RAG 侧默认 |
 | `AGENT_RAG_EVIDENCE_CHARS` | `4000` | 放入 prompt 的证据字符上限 |
 
+云端 provider 相关：`AGENT_CLOUD_BASE_URL`、`AGENT_CLOUD_MODELS`（两者必须同时设置）、`AGENT_CLOUD_API_KEY`（直接给 Key）或 `AGENT_CLOUD_API_KEY_ENV`（指向存放 Key 的环境变量名，默认 `ZAI_API_KEY`）、`AGENT_CLOUD_LABEL`（UI 显示名）。未配置 Key 时云端 provider 仍会出现，但探测与对话都会明确报「未配置 API Key」，不会静默失败。
+
 `RAG_KB_ROOT` 仍需设置，否则检索不可用（Agent 会警告并降级为纯对话，不会报错退出）。
 
 **问答模型和检索 embedding 是两套配置**，把其中一个指向远端不会带动另一个：
@@ -266,14 +290,16 @@ $env:ZAI_API_KEY = '...'
 .\scripts\init-cybersec-kb.ps1 -DataRoot C:\RAG-Agent-Data
 ```
 
-索引构建由上游工具完成，不在本仓库内，所以要显式告诉脚本去哪里找它（或用 `$env:CHATCHAT_SERVER_ROOT` 环境变量）：
+索引构建由上游工具完成，不在本仓库内，所以要显式告诉脚本去哪里找它（`-ServerRoot`，或 `$env:CHATCHAT_SERVER_ROOT`），并且所有导入脚本都接受同一个参数：
 
 ```powershell
 .\scripts\rebuild-knowledge-base.ps1 -KnowledgeBase cybersec -EmbeddingModel bge-m3 `
     -ServerRoot C:\path\to\LangGraph-Chatchat\chatchat-server
 ```
 
-没有 `-ServerRoot` 时脚本会明确报错，而不是静默失败。重建索引成功后会**自动**刷新 `build_cosine` 产物（`cybersec` 的便捷包装是同目录的 `rebuild-cybersec.ps1`，参数相同）。
+`rebuild-cybersec.ps1` 是同参数的 `cybersec` 便捷包装；`import-mydb.ps1`、`import-security-sources.ps1`、`import-des-ctf-knowledge.ps1` 都会把 `-ServerRoot` 透传给它。
+
+没有 `-ServerRoot`（且未设置 `CHATCHAT_SERVER_ROOT`）时脚本会明确报错，而不是静默失败。重建索引成功后会**自动**刷新 `build_cosine` 产物；sidecar 刷新失败会让脚本以非零退出并报错，因为此时服务会一直认为索引过期——修复后重跑 `python -m rag_service.build_cosine` 即可，新索引本身是完整的。
 
 `scripts/import-mydb.ps1`、`import-security-sources.ps1`、`import-des-ctf-knowledge.ps1`、`import_des_ctf_knowledge.py` 用于把外部资料导入独立知识库；导入前会做脱敏与噪声过滤，并保留来源清单。规则见脚本头部注释。
 
@@ -291,7 +317,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 318 passed
+# 324 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。

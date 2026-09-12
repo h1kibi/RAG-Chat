@@ -80,11 +80,17 @@ async def _run_check(config: AgentConfig) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    config = AgentConfig.from_environment()
-    if args.host:
-        config = _replace(config, host=args.host)
-    if args.port:
-        config = _replace(config, port=args.port)
+    try:
+        config = AgentConfig.from_environment()
+        if args.host:
+            config = _replace(config, host=args.host)
+        if args.port:
+            config = _replace(config, port=args.port)
+    except ValueError as exc:
+        # Configuration is operator input. Keep startup diagnostics at the same
+        # field-level, traceback-free boundary as the RAG CLI.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     if args.print_config:
         print(json.dumps(config.as_public_dict(), ensure_ascii=False, indent=2))

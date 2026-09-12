@@ -28,18 +28,21 @@
 .\scripts\init-cybersec-kb.ps1
 ```
 
-构建 FAISS 索引：
+构建 FAISS 索引（索引构建器不在本仓库，必须显式指出）：
 
 ```powershell
-.\scripts\rebuild-cybersec.ps1
+.\scripts\rebuild-cybersec.ps1 -ServerRoot C:\path\to\LangGraph-Chatchat\chatchat-server
 ```
+
+`-ServerRoot` 也可以预先用 `$env:CHATCHAT_SERVER_ROOT` 指定；两者都缺时脚本会直接报错。
 
 ## 导入外部资料
 
 一次导入两个上游仓库，并只重建一次 `cybersec`：
 
 ```powershell
-.\scripts\import-security-sources.ps1 -DataRoot C:\RAG-Agent-Data
+.\scripts\import-security-sources.ps1 -DataRoot C:\RAG-Agent-Data `
+    -ServerRoot C:\path\to\LangGraph-Chatchat\chatchat-server
 ```
 
 该脚本会把仓库浅克隆到 `C:\RAG-Agent-Data\sources`，固定并记录当前 commit，然后导入到：

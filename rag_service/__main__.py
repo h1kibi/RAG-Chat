@@ -63,10 +63,29 @@ def _parse_filter(raw: str) -> tuple[str, object]:
     return key, value
 
 
+def _parse_port(raw: str) -> int:
+    """Parse a port from either the CLI or the RAG_PORT environment variable."""
+    try:
+        port = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(
+            f"port must be an integer in 1..65535 (RAG_PORT got {raw!r})"
+        ) from exc
+    if not 1 <= port <= 65_535:
+        raise argparse.ArgumentTypeError(f"port must be in 1..65535 (got {port})")
+    return port
+
+
 def _add_serve_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default=os.environ.get("RAG_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("RAG_PORT", "8791")))
+    parser.add_argument(
+        "--port",
+        type=_parse_port,
+        default=os.environ.get("RAG_PORT", "8791"),
+        help="监听端口，默认取 RAG_PORT（8791）",
+    )
     parser.add_argument("--kb-root", default=None, help="knowledge base root directory")
+
 
 
 def _add_search_arguments(parser: argparse.ArgumentParser) -> None:
@@ -95,7 +114,11 @@ def _add_search_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--json", action="store_true", help="print the raw response JSON instead of evidence text"
     )
-    parser.add_argument("--kb-root", default=None, help="knowledge base root directory")
+    parser.add_argument(
+        "--kb-root",
+        default=argparse.SUPPRESS,
+        help="knowledge base root directory",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:

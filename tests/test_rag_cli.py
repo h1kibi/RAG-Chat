@@ -87,6 +87,19 @@ class CliParsingTests(unittest.TestCase):
         self.assertEqual(args.port, 9000)
 
 
+class CliPortTests(unittest.TestCase):
+    def test_invalid_rag_port_environment_is_a_usage_error(self):
+        captured = io.StringIO()
+        with patch.dict(os.environ, {"RAG_PORT": "not-a-port"}, clear=False):
+            with contextlib.redirect_stderr(captured):
+                with self.assertRaises(SystemExit) as raised:
+                    cli.main(["search", "x"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("RAG_PORT", captured.getvalue())
+        self.assertNotIn("Traceback", captured.getvalue())
+
+
 class CliSearchTests(unittest.TestCase):
     def test_search_prints_cited_evidence_and_closes_the_backend(self):
         backend = _FakeBackend()

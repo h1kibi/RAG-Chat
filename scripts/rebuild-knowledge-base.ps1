@@ -71,5 +71,6 @@ Write-Host "Refreshing standalone cosine sidecar for $KnowledgeBase..."
 $kbRoot = Join-Path $DataRoot "data\knowledge_base"
 & $localPython -m rag_service.build_cosine --kb-root $kbRoot --knowledge-base $KnowledgeBase
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning 'Sidecar refresh failed; standalone retrieval will report the index as stale until "python -m rag_service.build_cosine" succeeds.'
+    throw 'Sidecar refresh failed; standalone retrieval remains stale. Re-run "python -m rag_service.build_cosine" after fixing the error.'
 }
+

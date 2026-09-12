@@ -1,8 +1,9 @@
-param(
+﻿param(
     [string]$MyDBRoot = "C:\Tools\MyDB",
     [string]$DataRoot = "C:\RAG-Agent-Data",
     [switch]$SkipRebuild,
-    [string]$EmbeddingModel = "bge-m3"
+    [string]$EmbeddingModel = "bge-m3",
+    [string]$ServerRoot = $env:CHATCHAT_SERVER_ROOT
 )
 
 $ErrorActionPreference = "Stop"
@@ -180,10 +181,10 @@ $definitions = @(
 foreach ($definition in $definitions) {
     Import-MyDBSource -Definition $definition
 }
-
 if (-not $SkipRebuild) {
     Write-Host "Rebuilding cybersec vector index..."
-    & $rebuildScript -DataRoot $DataRoot -EmbeddingModel $EmbeddingModel
+    & $rebuildScript -DataRoot $DataRoot -EmbeddingModel $EmbeddingModel `
+        -ServerRoot $ServerRoot
     if ($LASTEXITCODE -ne 0) {
         throw "Cybersecurity KB rebuild failed"
     }

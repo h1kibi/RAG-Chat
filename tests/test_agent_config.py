@@ -1,3 +1,4 @@
+
 """Provider selection and environment parsing for the web chat agent."""
 import os
 import unittest
@@ -19,6 +20,21 @@ def _env(**values):
     cleaned = {key: value for key, value in os.environ.items() if key not in watched}
     cleaned.update({key: str(value) for key, value in values.items()})
     return patch.dict(os.environ, cleaned, clear=True)
+class AgentCliDiagnosticsTests(unittest.TestCase):
+    def test_invalid_environment_returns_field_error_without_traceback(self):
+        import contextlib
+        import io
+
+        from agent_service import __main__ as cli
+
+        stderr = io.StringIO()
+        with _env(AGENT_PORT="not-a-port"), contextlib.redirect_stderr(stderr):
+            code = cli.main(["--print-config"])
+
+        self.assertEqual(code, 2)
+        self.assertIn("AGENT_PORT", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
 
 
 class OfflineDefaultsTests(unittest.TestCase):

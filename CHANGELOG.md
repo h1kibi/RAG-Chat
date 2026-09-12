@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+### Fixed — 第六轮质检（CLI 配置诊断、脚本契约、环境变量文档）
+
+- **Agent CLI 把配置错误抛成回溯**：`AGENT_PORT=not-a-port` 运行
+  `python -m agent_service --print-config` 会打印十行回溯并以 1 退出。上一轮只给 RAG CLI
+  补了字段级契约，Agent CLI 漏了。现在同样输出 `error: AGENT_PORT must be an integer,
+  got 'not-a-port'` 并返回 2。
+- **RAG CLI 端口解析器吞掉命令行值**：`--port` 在 argparse 构建期用 `int()` 解析
+  `RAG_PORT`，`RAG_PORT=not-a-port` 直接抛 `ValueError` 回溯（退出 1）。改为端口专用解析器，
+  并把错误话术指向变量名。
+- **`--kb-root` 放在子命令之后会被静默忽略**：子解析器用 `default=None` 覆盖了全局值，
+  于是 `python -m rag_service --kb-root X search ...` 仍然去读环境变量。子解析器改用
+  `argparse.SUPPRESS`，两种位置都生效。
+- **`import-security-sources.ps1` 调用有必填参数的 `rebuild-knowledge-base.ps1` 时漏传
+  `-KnowledgeBase`**：PowerShell 不会报错，而是**停在交互式参数提示**上等待输入——
+  无人值守的导入脚本会静默挂起。`import-mydb.ps1` 与 `import-des-ctf-knowledge.ps1`
+  更糟：它们给 `rebuild-cybersec.ps1` 传了它并不存在的 `-KnowledgeBase`。
+- **三个导入脚本无法指定索引构建器**：新仓库要求显式 `-ServerRoot`（或
+  `CHATCHAT_SERVER_ROOT`），但包装脚本不转发该参数，于是导入完成后重建必然报
+  「index builder was not specified」。现在三处都接受并转发 `-ServerRoot`。
+- **sidecar 刷新失败仍返回成功**：PowerShell 脚本以非终止错误结束时退出码仍是 0，
+  因此 `rebuild-knowledge-base.ps1` 只会打印 `Write-Warning` 就「成功」返回，而服务此后一直
+  认为索引过期。改为 `throw`。实测：sidecar 构建失败时退出码 0 → 1。
+- **`rag_service/evaluate.py` 的注解引用了未导入的 `Any`**：`from __future__ import
+  annotations` 让它不至于报错，但注解无法求值。补上 `typing.Any`。
+- **环境变量文档补齐**：README 现在覆盖 RAG 全部可直接调整的旋钮（`RAG_HOST`/`RAG_PORT`、
+  候选池与召回上限、各类缓存与 TTL、`RAG_LOW_SCORE_WARN` 等）与 Agent 云端变量
+  （`AGENT_CLOUD_API_KEY`、`AGENT_CLOUD_LABEL`、以及「未配 Key 时云端 provider 仍会出现但会
+  明确报错」的行为）。`knowledge-base/cybersec/README.md` 的重建命令补上必需的 `-ServerRoot`。
+
+测试从 318 增至 324：新增 `tests/test_script_contracts.py`（跨脚本参数契约、sidecar 失败必须
+终止）与两个 CLI 诊断用例。参数契约用例在回退到真实缺陷形态后确认失败。
+
 ### Fixed — 第五轮质检（错误话术与诊断真实性）
 
 - **CLI 把配置错误抛成回溯**：`RAG_KB_ROOT` 未设置（第一次运行最常犯的错）时打印十行回溯并
@@ -61,7 +93,7 @@ base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以�
 测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
 补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
 
-五轮累计：280 → 318 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
+六轮累计：280 → 324 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
 
 ### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
 

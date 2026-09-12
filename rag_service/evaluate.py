@@ -28,6 +28,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from rag_service.config import RagConfig
 from rag_service.models import RetrievalRequest

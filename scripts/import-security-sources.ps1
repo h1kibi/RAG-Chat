@@ -2,7 +2,8 @@ param(
     [string]$DataRoot = "C:\RAG-Agent-Data",
     [switch]$Refresh,
     [switch]$SkipRebuild,
-    [string]$EmbeddingModel = "bge-m3"
+    [string]$EmbeddingModel = "bge-m3",
+    [string]$ServerRoot = $env:CHATCHAT_SERVER_ROOT
 )
 
 $ErrorActionPreference = "Stop"
@@ -125,7 +126,8 @@ foreach ($definition in $sources) {
 
 if (-not $SkipRebuild) {
     Write-Host "Rebuilding cybersec vector index..."
-    & $rebuildScript -DataRoot $DataRoot -EmbeddingModel $EmbeddingModel
+    & $rebuildScript -KnowledgeBase "cybersec" -DataRoot $DataRoot `
+        -EmbeddingModel $EmbeddingModel -ServerRoot $ServerRoot
     if ($LASTEXITCODE -ne 0) { throw "Cybersecurity KB rebuild failed" }
 }
 

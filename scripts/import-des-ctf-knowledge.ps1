@@ -3,7 +3,8 @@ param(
     [string]$SourceRoot = "",
     [ValidatePattern('^[A-Za-z0-9._/-]+$')]
     [string]$Ref = "main",
-    [switch]$Refresh
+    [switch]$Refresh,
+    [string]$ServerRoot = $env:CHATCHAT_SERVER_ROOT
 )
 
 $ErrorActionPreference = "Stop"
@@ -116,9 +117,8 @@ $importArgs = @(
 if ($LASTEXITCODE -ne 0) {
     throw "Des-CTF-Knowledge import failed"
 }
-
 Write-Host "Rebuilding cybersec vector index..."
-& $rebuildScript -DataRoot $DataRoot
+& $rebuildScript -DataRoot $DataRoot -ServerRoot $ServerRoot
 if ($LASTEXITCODE -ne 0) {
     throw "Cybersecurity KB rebuild failed"
 }
