@@ -9,7 +9,7 @@
 ## 两个模块
 
 ```
-RAG-Agent/
+<repo>/
 ├── rag_service/        RAG 检索模块 —— 只读，可独立交付
 │                       MCP 工具 / HTTP API / CLI / LangChain / OpenAI schema
 ├── agent_service/      Agent 模块 —— 本地 Web 对话
