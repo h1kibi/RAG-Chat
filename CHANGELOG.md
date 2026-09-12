@@ -16,7 +16,7 @@
   建议的 `build_cosine` 会回答「产物已是最新」而什么都不修。现在区分三种状态：缺失
   （指向 build_cosine）、存在但不可读（指向 `--force` 并提示检查内存）、以及正常走 sq8。
 
-测试从 311 增至 317：新增 `tests/test_cli_diagnostics.py`（CLI 错误契约、sq8 三态诊断），
+测试从 311 增至 318：新增 `tests/test_cli_diagnostics.py`（CLI 错误契约、sq8 三态诊断），
 两个修复都在回退后确认测试确实失败。
 
 ### Fixed — 第四轮质检（对抗性 + 全流程复检）
@@ -61,7 +61,7 @@ base_url，embedding 用的是 `RAG_OLLAMA_BASE_URL`），留着会让人误以�
 测试从 308 增至 311：新增 `StoreLifetimeTests`（租约语义、空闲仍解映射、并发搜索中途 close），
 补充 `RAG_MAX_QUERY_LENGTH` 边界与健康检查的用例。每个修复都在回退后确认测试会失败。
 
-五轮累计：280 → 317 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
+五轮累计：280 → 318 个测试（CHANGELOG 每节记录各自的增量，README 与 MCP.md 只写当前值）。
 
 ### Fixed — 前三轮质检（克隆可用性、检索状态、agent 交互）
 

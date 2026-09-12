@@ -32,19 +32,30 @@ def create_langchain_tool(service: RagService, *, name: str = "search_knowledge_
         snippet_chars: Optional[int] = None,
         cursor: Optional[str] = None,
     ) -> str:
-        request = RetrievalRequest(
-            query=query,
-            knowledge_base=knowledge_base or service.config.default_knowledge_base,
-            top_k=top_k,
-            limit=limit,
-            score_threshold=score_threshold,
-            filters=filters or {},
-            merge_neighbors=merge_neighbors,
-            lexical_weight=lexical_weight,
-            strip_images=strip_images,
-            snippet_chars=snippet_chars,
-            cursor=cursor,
-        )
+        from pydantic import ValidationError
+
+        from rag_service.models import describe_validation_error
+
+        try:
+            request = RetrievalRequest(
+                query=query,
+                knowledge_base=knowledge_base or service.config.default_knowledge_base,
+                top_k=top_k,
+                limit=limit,
+                score_threshold=score_threshold,
+                filters=filters or {},
+                merge_neighbors=merge_neighbors,
+                lexical_weight=lexical_weight,
+                strip_images=strip_images,
+                snippet_chars=snippet_chars,
+                cursor=cursor,
+            )
+        except ValidationError as exc:
+            # Same treatment as the OpenAI adapter: an LLM caller must be told
+            # what to fix, and pydantic's text is a machine dump that names an
+            # errors.pydantic.dev URL and echoes the offending value -- which for
+            # a long query is context the model already has.
+            raise ValueError(f"invalid arguments: {describe_validation_error(exc)}") from None
         return service.search(request).as_tool_text()
 
     return StructuredTool.from_function(

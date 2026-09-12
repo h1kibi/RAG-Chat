@@ -972,6 +972,17 @@ class ValidationSurfaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "top_k"):
             dispatch_openai_tool_call(service, {"query": "x", "top_k": 0})
 
+    def test_langchain_tool_reports_a_fixable_message(self):
+        # The last entry point to be translated: it used to hand back pydantic's
+        # dump, naming an errors.pydantic.dev URL instead of the field.
+        from rag_service.adapters import create_langchain_tool
+
+        backend = FaissBackend(_config())
+        tool = create_langchain_tool(RagService(backend.config, backend))
+        with self.assertRaisesRegex(ValueError, "top_k") as ctx:
+            tool.invoke({"query": "x", "top_k": 0})
+        self.assertNotIn("pydantic.dev", str(ctx.exception))
+
     def test_openai_dispatch_still_validates_successfully(self):
         from unittest.mock import patch
 
