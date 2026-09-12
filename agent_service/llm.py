@@ -8,7 +8,7 @@ online modes differ only in which ``LlmProvider`` is selected.
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator, Iterable, Mapping, Sequence
+from typing import Any, AsyncIterator, Dict, Iterable, Mapping, Optional, Sequence
 
 import httpx
 
@@ -88,6 +88,34 @@ def _extract_delta(payload: dict) -> str:
     return message.get("content") or ""
 
 
+def _finish_reason(payload: dict) -> str:
+    """The upstream ``finish_reason`` for this chunk, or "".
+
+    `"length"` means the provider stopped because it hit ``max_tokens``: the
+    answer is cut off mid-sentence. Dropping this made a truncated reply look
+    like a finished one (and, when it lands mid-list, like a stalled stream).
+    """
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+    return str((choices[0] or {}).get("finish_reason") or "")
+
+
+def _reasoning_chars(payload: dict) -> int:
+    """Length of this chunk's ``reasoning_content``, for reasoning models.
+
+    DeepSeek and similar reasoners stream their thinking on this field and only
+    then emit the answer on ``delta.content``. Those tokens are billed against
+    ``max_tokens`` but are not part of the answer, so a small budget can be spent
+    entirely on thinking, leaving the visible reply empty.
+    """
+    choices = payload.get("choices") or []
+    if not choices:
+        return 0
+    delta = (choices[0] or {}).get("delta") or {}
+    return len(delta.get("reasoning_content") or "")
+
+
 def _iter_sse_lines(raw: Iterable[str]) -> Iterable[str]:
     for line in raw:
         line = line.strip()
@@ -105,12 +133,16 @@ async def stream_chat(
     temperature: float,
     max_tokens: int,
     timeout: float,
+    state: Optional[Dict[str, Any]] = None,
 ) -> AsyncIterator[str]:
     """Yield answer text chunks for one chat request.
 
     Errors are raised before any chunk is yielded when possible; a mid-stream
     failure propagates as ``ProviderResponseError`` so the caller can keep the
     text already shown rather than replacing it with a blank answer.
+
+    ``state``, when given, receives ``finish_reason`` so the caller can tell a
+    complete answer from one the provider cut short.
     """
     if not provider.offline and not provider.api_key:
         raise MissingCredentialError(
@@ -138,7 +170,7 @@ async def stream_chat(
                 if "text/event-stream" not in content_type:
                     # A gateway ignored `stream`; return the whole answer at once.
                     await response.aread()
-                    yield _read_non_streaming(provider, response, model)
+                    yield _read_non_streaming(provider, response, model, state=state)
                     return
 
                 async for line in response.aiter_lines():
@@ -153,13 +185,24 @@ async def stream_chat(
                                 hint="该端点可能不是 OpenAI 兼容接口。",
                             ) from None
                         text = _extract_delta(chunk)
+                        reason = _finish_reason(chunk)
+                        if reason and state is not None:
+                            state["finish_reason"] = reason
+                        if state is not None:
+                            state["reasoning_chars"] = state.get("reasoning_chars", 0) + _reasoning_chars(chunk)
                         if text:
                             yield text
     except httpx.HTTPError as exc:
         raise _wrap_transport_error(provider, model, exc) from exc
 
 
-def _read_non_streaming(provider: LlmProvider, response: httpx.Response, model: str) -> str:
+def _read_non_streaming(
+    provider: LlmProvider,
+    response: httpx.Response,
+    model: str,
+    *,
+    state: Optional[Dict[str, Any]] = None,
+) -> str:
     try:
         payload = response.json()
     except ValueError as exc:
@@ -173,6 +216,10 @@ def _read_non_streaming(provider: LlmProvider, response: httpx.Response, model: 
             f"{provider.label} 的响应没有 choices 字段：{_body_snippet(response)}",
             hint="确认模型名正确，且端点支持 /chat/completions。",
         )
+    if state is not None:
+        reason = _finish_reason(payload)
+        if reason:
+            state["finish_reason"] = reason
     return ((choices[0] or {}).get("message") or {}).get("content") or ""
 
 

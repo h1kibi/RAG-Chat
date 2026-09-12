@@ -17,7 +17,7 @@
 ├── knowledge-base/     知识库模板（Git 内，8 篇示例文档）
 ├── examples/demo-kb/   演示索引（93 KB），开箱即可查询
 ├── scripts/            建库与导入脚本
-└── tests/              340 个测试
+└── tests/              348 个测试
 ```
 
 两者**解耦**：`rag_service` 不 import `agent_service`，也不 import 任何 Agent 框架；`agent_service` 通过 `agent_service/rag.py` 这一个桥接点消费检索能力。所以你可以只用 RAG 工具接自己的 Agent，完全不需要 Agent 模块。
@@ -260,13 +260,20 @@ $env:ZAI_API_KEY = '...'
 | `AGENT_OLLAMA_MODELS` | `qwen2.5:7b` | 逗号分隔 |
 | `AGENT_SYSTEM_PROMPT` | 内置 | |
 | `AGENT_HISTORY_LEN` | `10` | 送入模型的最近消息条数 |
-| `AGENT_TEMPERATURE` / `AGENT_MAX_TOKENS` | `0.2` / `1024` | |
+| `AGENT_TEMPERATURE` / `AGENT_MAX_TOKENS` | `0.2` / `1024` | **推理模型要给够**：思考内容与实际回答共用这个预算 |
 | `AGENT_REQUEST_TIMEOUT` | `300` | 秒。离线 7B 首 token 较慢 |
 | `AGENT_RAG_ENABLED` | `1` | 关掉就是纯对话 |
 | `AGENT_RAG_KNOWLEDGE_BASE` | 空 | 空则用 RAG 侧默认 |
 | `AGENT_RAG_TOP_K` | `5` | |
 | `AGENT_RAG_SCORE_THRESHOLD` | 空 | 空则用 RAG 侧默认 |
 | `AGENT_RAG_EVIDENCE_CHARS` | `4000` | 放入 prompt 的证据字符上限 |
+
+**推理模型（如 `deepseek-flash`）需要更大的 `AGENT_MAX_TOKENS`。** 它的思考写在
+`reasoning_content`（界面不显示），并**与最终回答共用同一个 token 预算**：预算太小会导致长时间无输出、
+然后回答还没开始就被截断。实测 `max_tokens=1024` 时，一个正常问题先花掉约 1.3 秒/百字的思考，
+13 秒后才出现第一个可见字符。服务会识别这种情况并给出可执行的提示；界面在等待期间显示
+`生成中… Ns` 计时，避免误判为卡死。建议推理模型用 `4096`。
+可选：`AGENT_CLOUD_API_KEY_ENV`/`AGENT_CLOUD_LABEL`（见下）。
 
 云端 provider 相关：`AGENT_CLOUD_BASE_URL`、`AGENT_CLOUD_MODELS`（两者必须同时设置）、`AGENT_CLOUD_API_KEY`（直接给 Key）或 `AGENT_CLOUD_API_KEY_ENV`（指向存放 Key 的环境变量名，默认 `ZAI_API_KEY`）、`AGENT_CLOUD_LABEL`（UI 显示名）。未配置 Key 时云端 provider 仍会出现，但探测与对话都会明确报「未配置 API Key」，不会静默失败。
 
@@ -337,7 +344,7 @@ $env:ZAI_API_KEY = '...'
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
-# 340 passed
+# 348 passed
 ```
 
 覆盖：检索打分与融合、路径/年份/镜像去重过滤、分页与单块回取、MCP 边界与错误话术、索引转换、CLI 参数、Agent 配置解析、prompt 组装与历史裁剪、SSE 事件流、鉴权、脱敏。

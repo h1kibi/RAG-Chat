@@ -209,6 +209,8 @@ async def run_turn(config: AgentConfig, turn: ChatTurn) -> AsyncIterator[Dict[st
             }
 
     messages = build_messages(config, turn, evidence)
+    stream_state: Dict[str, Any] = {}
+    answer_started = False
     try:
         async for chunk in stream_chat(
             provider,
@@ -217,10 +219,38 @@ async def run_turn(config: AgentConfig, turn: ChatTurn) -> AsyncIterator[Dict[st
             temperature=turn.temperature if turn.temperature is not None else config.temperature,
             max_tokens=config.max_tokens,
             timeout=config.request_timeout,
+            state=stream_state,
         ):
+            answer_started = answer_started or bool(chunk.strip())
             yield {"type": "delta", "text": chunk}
     except AgentError as exc:
         yield {"type": "error", **exc.as_dict()}
         return
+
+    # A provider that stopped at `max_tokens` returns a half-finished answer that
+    # is indistinguishable from a complete one -- when the cut lands mid-list it
+    # reads as a stalled stream. Say so, with the knob that changes it.
+    if stream_state.get("finish_reason") == "length":
+        reasoning = int(stream_state.get("reasoning_chars") or 0)
+        if not answer_started and reasoning:
+            # A reasoning model spent the whole budget on its hidden thinking, so
+            # the user waited and then got nothing at all.
+            message = (
+                f"{provider.label} 是推理模型：它在隐藏的思考上花掉了 {reasoning} 字符的 token 预算"
+                f"（max_tokens={config.max_tokens}），回答还没开始输出就被截断了。"
+                "请把 AGENT_MAX_TOKENS 提到 4096 或更高，或换用非推理模型。"
+            )
+        elif not answer_started:
+            message = (
+                f"模型在达到 max_tokens 上限（{config.max_tokens}）时还没有输出任何回答内容。"
+                "请提高 AGENT_MAX_TOKENS。"
+            )
+        else:
+            message = (
+                f"回答达到 max_tokens 上限（{config.max_tokens}）被截断，"
+                "后面还有内容未输出。提高 AGENT_MAX_TOKENS（例如 4096）可让回答完整；"
+                "也可以要求模型分点作答、缩短篇幅。"
+            )
+        yield {"type": "warning", "message": message}
 
     yield {"type": "done", "provider": provider.id, "model": model}

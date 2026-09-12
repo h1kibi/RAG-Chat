@@ -191,6 +191,17 @@ async function send() {
   const outgoing = state.messages.slice(-historyLen);
 
   let answer = "";
+  // Reasoning models stream their thinking to a field the answer never shows, so
+  // a long think looks like a frozen page: no text for tens of seconds, then a
+  // partial answer. Keep a visible clock running until the first token of the
+  // answer arrives, so "still working" is distinguishable from "stuck".
+  const started = Date.now();
+  const ticker = setInterval(() => {
+    if (answer.length === 0) {
+      sendButton.textContent = `生成中… ${Math.round((Date.now() - started) / 1000)}s`;
+    }
+  }, 1000);
+
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -258,6 +269,7 @@ async function send() {
   } catch (err) {
     note(wrap, "连接中断：" + err, true);
   } finally {
+    clearInterval(ticker);
     if (answer.trim()) state.messages.push({ role: "assistant", content: answer });
     state.busy = false;
     sendButton.disabled = false;
